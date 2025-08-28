@@ -1,0 +1,30 @@
+# 163邮箱邮件导出工具依赖文件
+# 本项目主要使用Python标准库，无需安装额外的第三方包
+
+# Python版本要求
+# Python >= 3.6
+
+# 标准库模块（无需安装）:
+# - imaplib: IMAP邮件协议支持
+# - email: 邮件解析和处理
+# - csv: CSV文件读写
+# - tkinter: 图形界面（通常随Python安装）
+# - datetime: 日期时间处理
+# - threading: 多线程支持
+# - queue: 队列数据结构
+# - os: 操作系统接口
+# - re: 正则表达式
+# - locale: 本地化支持
+# - time: 时间相关功能
+# - argparse: 命令行参数解析
+# - getpass: 安全密码输入
+# - sys: 系统相关功能
+
+# 注意事项:
+# 1. 如果系统中没有tkinter，可能需要单独安装:
+#    - Ubuntu/Debian: sudo apt-get install python3-tk
+#    - CentOS/RHEL: sudo yum install tkinter
+#    - Windows/macOS: 通常随Python安装包自带
+
+# 2. 本项目不依赖任何第三方PyPI包
+# 3. 建议使用Python 3.6或更高版本以获得最佳兼容性

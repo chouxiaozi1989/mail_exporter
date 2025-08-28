@@ -1,9 +1,77 @@
 import imaplib
 import email
 import email.header
+from email.utils import parsedate_to_datetime
 import csv
 import re
+import locale
+import time
+import argparse
+import getpass
+import sys
+import base64
 from datetime import datetime, timedelta
+
+def decode_imap_utf7(text):
+    """解码IMAP UTF-7编码的文件夹名称
+    
+    Args:
+        text: IMAP UTF-7编码的文本
+        
+    Returns:
+        解码后的Unicode文本
+    """
+    # 直接使用手动实现，更可靠
+    return _manual_decode_imap_utf7(text)
+
+def _manual_decode_imap_utf7(text):
+    """手动实现IMAP UTF-7解码（备用方案）"""
+    result = []
+    i = 0
+    while i < len(text):
+        if text[i] == '&':
+            if i + 1 < len(text) and text[i + 1] == '-':
+                # &- 表示字面量 &
+                result.append('&')
+                i += 2
+            else:
+                # 查找编码序列的结束
+                end = text.find('-', i + 1)
+                if end == -1:
+                    # 没有找到结束符，直接添加剩余字符
+                    result.append(text[i:])
+                    break
+                
+                # 提取编码部分
+                encoded = text[i + 1:end]
+                if encoded:
+                    try:
+                        # IMAP UTF-7使用修改版的base64编码
+                        # 替换字符：+ -> /, , -> +
+                        encoded = encoded.replace(',', '+')
+                        
+                        # 添加必要的padding
+                        while len(encoded) % 4 != 0:
+                            encoded += '='
+                        
+                        # base64解码
+                        decoded_bytes = base64.b64decode(encoded)
+                        # UTF-16BE解码
+                        decoded_text = decoded_bytes.decode('utf-16be')
+                        result.append(decoded_text)
+                    except Exception:
+                        # 解码失败，保持原始文本
+                        result.append(text[i:end + 1])
+                else:
+                    # 空编码序列，跳过
+                    pass
+                
+                i = end + 1
+        else:
+            result.append(text[i])
+            i += 1
+    
+    return ''.join(result)
 
 def get_mail_folders(username, password):
     """获取邮箱中所有文件夹列表
@@ -29,13 +97,30 @@ def get_mail_folders(username, password):
             for folder_info in folder_list:
                 # 解析文件夹信息
                 # 格式通常为: (\HasNoChildren) "." "INBOX"
-                folder_str = folder_info.decode('utf-8')
+                # 尝试多种编码方式解码文件夹信息
+                folder_str = None
+                for encoding in ['utf-8', 'gb2312', 'gbk', 'latin1']:
+                    try:
+                        folder_str = folder_info.decode(encoding)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                
+                if folder_str is None:
+                    # 如果所有编码都失败，使用错误处理方式
+                    folder_str = folder_info.decode('utf-8', errors='ignore')
                 
                 # 提取文件夹名称（最后一个引号内的内容）
-                import re
                 match = re.search(r'"([^"]+)"\s*$', folder_str)
                 if match:
                     folder_name = match.group(1)
+                    
+                    # 如果文件夹名称包含IMAP UTF-7编码字符，进行解码
+                    if '&' in folder_name:
+                        try:
+                            folder_name = decode_imap_utf7(folder_name)
+                        except:
+                            pass  # 如果解码失败，保持原始名称
                     
                     # 创建显示名称（中文化常见文件夹名）
                     display_name = folder_name
@@ -99,7 +184,6 @@ def fetch_emails(username, password, start_date, end_date, output_csv, folder="I
         mail.select(folder)
         
         # 格式化日期查询条件 - 强制使用英文locale避免本地化问题
-        import locale
         old_locale = locale.getlocale(locale.LC_TIME)
         try:
             # 强制使用C locale确保英文月份缩写
@@ -222,7 +306,6 @@ def fetch_emails(username, password, start_date, end_date, output_csv, folder="I
                         except Exception as e:
                             retry_count += 1
                             if retry_count < max_retries:
-                                import time
                                 time.sleep(0.5)
                                 continue
                             else:
@@ -241,7 +324,6 @@ def fetch_emails(username, password, start_date, end_date, output_csv, folder="I
                         date_str = msg['Date']
                         if date_str:
                             # 尝试解析各种可能的日期格式
-                            from email.utils import parsedate_to_datetime
                             date = parsedate_to_datetime(date_str).strftime('%Y-%m-%d %H:%M:%S')
                         else:
                             date = "[未知日期]"
@@ -312,7 +394,6 @@ def fetch_emails(username, password, start_date, end_date, output_csv, folder="I
                 
                 # 批次处理完成后的休息和连接保活
                 if batch_end < total_emails:
-                    import time
                     time.sleep(0.1)  # 批次间短暂休息
                     
                     # 每处理10批邮件后发送NOOP命令保持连接
@@ -421,7 +502,6 @@ def get_mail_from(from_):
             
             # 提取邮箱地址
             # 格式可能是 "姓名 <email@example.com>" 或纯邮箱地址
-            import re
             email_match = re.search(r'<([^<>]+)>', from_str)
             if email_match:
                 # 只返回邮箱地址部分
@@ -448,10 +528,6 @@ def get_mail_from(from_):
 
 
 if __name__ == "__main__":
-    import argparse
-    import getpass
-    import sys
-    
     # 创建命令行参数解析器
     parser = argparse.ArgumentParser(description="163邮箱邮件导出工具")
     parser.add_argument("-u", "--username", help="邮箱用户名")
