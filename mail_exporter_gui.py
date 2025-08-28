@@ -151,6 +151,38 @@ class MailExporterGUI:
         
         browse_btn = ttk.Button(output_frame, text="浏览", command=self.browse_output_file)
         browse_btn.grid(row=0, column=1, padx=(5, 0))
+        row += 1
+        
+        # 附件下载选项
+        ttk.Label(input_frame, text="附件下载:").grid(row=row, column=0, sticky=tk.W, pady=2)
+        attachment_frame = ttk.Frame(input_frame)
+        attachment_frame.grid(row=row, column=1, sticky=(tk.W, tk.E), padx=(10, 0), pady=2)
+        attachment_frame.columnconfigure(0, weight=1)
+        
+        self.download_attachments_var = tk.BooleanVar(value=False)
+        attachment_checkbox = ttk.Checkbutton(attachment_frame, text="下载邮件附件", 
+                                            variable=self.download_attachments_var,
+                                            command=self.toggle_attachment_folder)
+        attachment_checkbox.grid(row=0, column=0, sticky=tk.W)
+        row += 1
+        
+        # 附件保存目录
+        ttk.Label(input_frame, text="附件目录:").grid(row=row, column=0, sticky=tk.W, pady=2)
+        attachment_folder_frame = ttk.Frame(input_frame)
+        attachment_folder_frame.grid(row=row, column=1, sticky=(tk.W, tk.E), padx=(10, 0), pady=2)
+        attachment_folder_frame.columnconfigure(0, weight=1)
+        
+        self.attachment_folder_var = tk.StringVar(value="")
+        self.attachment_folder_entry = ttk.Entry(attachment_folder_frame, textvariable=self.attachment_folder_var, state="disabled")
+        self.attachment_folder_entry.grid(row=0, column=0, sticky=(tk.W, tk.E))
+        
+        self.browse_attachment_btn = ttk.Button(attachment_folder_frame, text="浏览", command=self.browse_attachment_folder, state="disabled")
+        self.browse_attachment_btn.grid(row=0, column=1, padx=(5, 0))
+        
+        # 添加说明文本
+        attachment_note = ttk.Label(input_frame, text="(留空则在CSV文件同目录下创建attachments文件夹)", 
+                                  font=('Arial', 8), foreground='gray')
+        attachment_note.grid(row=row+1, column=1, sticky=tk.W, padx=(10, 0), pady=(0, 5))
     
     def create_progress_area(self, parent):
         """创建进度显示区域"""
@@ -269,6 +301,23 @@ class MailExporterGUI:
         if filename:
             self.output_var.set(filename)
     
+    def toggle_attachment_folder(self):
+        """切换附件文件夹输入框状态"""
+        if self.download_attachments_var.get():
+            self.attachment_folder_entry.config(state="normal")
+            self.browse_attachment_btn.config(state="normal")
+        else:
+            self.attachment_folder_entry.config(state="disabled")
+            self.browse_attachment_btn.config(state="disabled")
+    
+    def browse_attachment_folder(self):
+        """浏览附件保存目录"""
+        folder = filedialog.askdirectory(
+            title="选择附件保存目录"
+        )
+        if folder:
+            self.attachment_folder_var.set(folder)
+    
     def start_export(self):
         """开始导出"""
         # 验证输入
@@ -374,6 +423,10 @@ class MailExporterGUI:
             if not folder:
                 folder = "INBOX"
             
+            # 获取附件下载参数
+            download_attachments = self.download_attachments_var.get()
+            attachment_folder = self.attachment_folder_var.get().strip() if download_attachments else None
+            
             # 发送开始消息
             self.message_queue.put(("log", f"开始导出邮件..."))
             self.message_queue.put(("log", f"用户: {username}"))
@@ -381,8 +434,17 @@ class MailExporterGUI:
             self.message_queue.put(("log", f"输出文件: {output_file}"))
             self.message_queue.put(("log", f"邮箱文件夹: {folder}"))
             
-            # 调用导出函数，传入进度回调
-            email_count = fetch_emails(username, password, start_date, end_date, output_file, folder, self.progress_callback)
+            if download_attachments:
+                if attachment_folder:
+                    self.message_queue.put(("log", f"附件保存目录: {attachment_folder}"))
+                else:
+                    self.message_queue.put(("log", "附件保存目录: CSV文件同目录下的attachments文件夹"))
+            else:
+                self.message_queue.put(("log", "不下载附件"))
+            
+            # 调用导出函数，传入进度回调和附件参数
+            email_count = fetch_emails(username, password, start_date, end_date, output_file, folder, 
+                                     self.progress_callback, download_attachments, attachment_folder)
             
             if self.is_exporting:
                 self.message_queue.put(("success", f"导出完成! 共导出 {email_count} 封邮件到 {output_file}"))

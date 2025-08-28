@@ -10,6 +10,7 @@ import argparse
 import getpass
 import sys
 import base64
+import os
 from datetime import datetime, timedelta
 
 def decode_imap_utf7(text):
@@ -154,7 +155,7 @@ def get_mail_folders(username, password):
     
     return folders
 
-def fetch_emails(username, password, start_date, end_date, output_csv, folder="INBOX", progress_callback=None):
+def fetch_emails(username, password, start_date, end_date, output_csv, folder="INBOX", progress_callback=None, download_attachments=False, attachment_folder=None):
     """从163邮箱获取指定时间段的邮件并导出为CSV
     
     Args:
@@ -165,11 +166,27 @@ def fetch_emails(username, password, start_date, end_date, output_csv, folder="I
         output_csv: 输出CSV文件路径
         folder: 邮箱文件夹，默认为INBOX
         progress_callback: 进度回调函数，接收(current, total, message)参数
+        download_attachments: 是否下载附件，默认为False
+        attachment_folder: 附件保存文件夹路径，如果为None则使用默认路径
     
     Returns:
         导出的邮件数量
     """
     email_count = 0
+    
+    # 初始化附件文件夹
+    if download_attachments:
+        if attachment_folder is None:
+            # 使用CSV文件同目录下的attachments文件夹
+            csv_dir = os.path.dirname(os.path.abspath(output_csv))
+            attachment_folder = os.path.join(csv_dir, 'attachments')
+        
+        # 创建附件文件夹
+        if not os.path.exists(attachment_folder):
+            os.makedirs(attachment_folder)
+            if progress_callback:
+                progress_callback(0, 0, f"创建附件文件夹: {attachment_folder}")
+    
     try:
         # 连接163邮箱IMAP服务器
         mail = imaplib.IMAP4_SSL(host='imap.163.com', port=993)
@@ -262,7 +279,10 @@ def fetch_emails(username, password, start_date, end_date, output_csv, folder="I
         # 准备CSV文件
         with open(output_csv, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(['日期', '发件人', '主题', '内容'])
+            if download_attachments:
+                writer.writerow(['日期', '发件人', '主题', '内容', '附件数量', '附件列表'])
+            else:
+                writer.writerow(['日期', '发件人', '主题', '内容'])
 
             # 分批处理邮件，避免内存问题和服务器限制
             batch_size = 50  # 每批处理50封邮件
@@ -374,8 +394,21 @@ def fetch_emails(username, password, start_date, end_date, output_csv, folder="I
                             print(f"解析邮件内容失败: {e}")
                             body = "[邮件内容解析错误]"
                     
+                    # 处理附件（如果启用）
+                    attachment_count = 0
+                    attachment_files = []
+                    if download_attachments:
+                        attachment_count, attachment_files = process_attachments(
+                            msg, attachment_folder, processed_count + 1, progress_callback
+                        )
+                    
                     # 写入CSV文件 - 对所有邮件都执行
-                    writer.writerow([date, from_, subject, body])
+                    if download_attachments:
+                        attachment_list = '; '.join(attachment_files) if attachment_files else '无附件'
+                        writer.writerow([date, from_, subject, body, attachment_count, attachment_list])
+                    else:
+                        writer.writerow([date, from_, subject, body])
+                    
                     email_count += 1
                     processed_count += 1  # 每处理完一封邮件就更新计数
                     
@@ -438,6 +471,91 @@ def fetch_emails(username, password, start_date, end_date, output_csv, folder="I
         if email_count > 0:
             progress_callback(email_count, email_count, f"导出完成 - 共处理 {email_count} 封邮件")
     return email_count
+
+def process_attachments(msg, attachment_folder, email_index, progress_callback=None):
+    """处理邮件附件
+    
+    Args:
+        msg: 邮件消息对象
+        attachment_folder: 附件保存文件夹
+        email_index: 邮件索引，用于创建唯一文件夹
+        progress_callback: 进度回调函数
+    
+    Returns:
+        tuple: (附件数量, 附件文件列表)
+    """
+    attachment_count = 0
+    attachment_files = []
+    
+    if not msg.is_multipart():
+        return attachment_count, attachment_files
+    
+    # 为当前邮件创建子文件夹
+    email_attachment_folder = os.path.join(attachment_folder, f"email_{email_index}")
+    
+    for part in msg.walk():
+        content_disposition = str(part.get("Content-Disposition", ""))
+        
+        # 检查是否为附件
+        if "attachment" in content_disposition:
+            filename = part.get_filename()
+            if filename:
+                try:
+                    # 解码文件名
+                    if filename.startswith('=?') and filename.endswith('?='):
+                        decoded_parts = email.header.decode_header(filename)
+                        filename_str = ""
+                        for part_data, charset in decoded_parts:
+                            if isinstance(part_data, bytes):
+                                if charset:
+                                    try:
+                                        filename_str += part_data.decode(charset, errors='ignore')
+                                    except (LookupError, UnicodeDecodeError):
+                                        filename_str += part_data.decode('utf-8', errors='ignore')
+                                else:
+                                    filename_str += part_data.decode('utf-8', errors='ignore')
+                            else:
+                                filename_str += part_data
+                        filename = filename_str
+                    
+                    # 创建邮件附件文件夹
+                    if not os.path.exists(email_attachment_folder):
+                        os.makedirs(email_attachment_folder)
+                    
+                    # 生成安全的文件名
+                    safe_filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
+                    if not safe_filename:
+                        safe_filename = f"attachment_{attachment_count + 1}"
+                    
+                    file_path = os.path.join(email_attachment_folder, safe_filename)
+                    
+                    # 如果文件已存在，添加数字后缀
+                    counter = 1
+                    original_path = file_path
+                    while os.path.exists(file_path):
+                        name, ext = os.path.splitext(original_path)
+                        file_path = f"{name}_{counter}{ext}"
+                        counter += 1
+                    
+                    # 保存附件
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        with open(file_path, 'wb') as f:
+                            f.write(payload)
+                        
+                        attachment_count += 1
+                        attachment_files.append(os.path.relpath(file_path, attachment_folder))
+                        
+                        if progress_callback:
+                            progress_callback(0, 0, f"保存附件: {safe_filename}")
+                        
+                except Exception as e:
+                    if progress_callback:
+                        progress_callback(0, 0, f"保存附件失败: {filename} - {str(e)[:50]}")
+                    else:
+                        print(f"保存附件失败: {filename} - {str(e)[:50]}")
+    
+    return attachment_count, attachment_files
 
 def decode_subject(subject):
     """解码邮件主题
@@ -535,6 +653,8 @@ if __name__ == "__main__":
     parser.add_argument("-e", "--end", help="结束日期 (YYYY-MM-DD)")
     parser.add_argument("-o", "--output", default="emails.csv", help="输出CSV文件路径")
     parser.add_argument("-f", "--folder", default="INBOX", help="邮箱文件夹，默认为INBOX")
+    parser.add_argument("-a", "--attachments", action="store_true", help="下载邮件附件")
+    parser.add_argument("--attachment-folder", help="附件保存文件夹路径，默认为CSV文件同目录下的attachments文件夹")
     
     args = parser.parse_args()
     
@@ -569,13 +689,28 @@ if __name__ == "__main__":
     print(f"用户: {args.username}")
     print(f"时间范围: {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
     print(f"输出文件: {args.output}")
-    print(f"邮箱文件夹: {args.folder}\n")
+    print(f"邮箱文件夹: {args.folder}")
+    if args.attachments:
+        print(f"附件下载: 启用")
+        if args.attachment_folder:
+            print(f"附件保存路径: {args.attachment_folder}")
+        else:
+            print(f"附件保存路径: 默认(CSV文件同目录下的attachments文件夹)")
+    else:
+        print(f"附件下载: 禁用")
+    print()
     
     # 执行邮件导出
     try:
-        email_count = fetch_emails(args.username, args.password, start_date, end_date, args.output, args.folder)
+        email_count = fetch_emails(
+            args.username, args.password, start_date, end_date, args.output, args.folder,
+            download_attachments=args.attachments, attachment_folder=args.attachment_folder
+        )
         if email_count > 0:
             print(f"\n导出完成! 共导出 {email_count} 封邮件到 {args.output}")
+            if args.attachments:
+                attachment_path = args.attachment_folder or os.path.join(os.path.dirname(os.path.abspath(args.output)), 'attachments')
+                print(f"附件已保存到: {attachment_path}")
         else:
             print("\n未找到符合条件的邮件")
     except Exception as e:
