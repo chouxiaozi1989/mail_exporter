@@ -6,11 +6,21 @@ import queue
 import os
 from mail_exporter import fetch_emails, get_mail_folders
 
+# 尝试导入日期选择器，如果没有安装则使用普通输入框
+try:
+    from tkcalendar import DateEntry
+    HAS_DATE_PICKER = True
+except ImportError:
+    HAS_DATE_PICKER = False
+
+# 程序版本信息
+VERSION = "1.2.0"
+
 class MailExporterGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("163邮箱邮件导出工具")
-        self.root.geometry("600x500")
+        self.root.geometry("700x650")
         self.root.resizable(True, True)
         
         # 创建消息队列用于线程间通信
@@ -33,9 +43,12 @@ class MailExporterGUI:
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
         
-        # 标题
+        # 标题和版本信息
         title_label = ttk.Label(main_frame, text="163邮箱邮件导出工具", font=('Arial', 16, 'bold'))
-        title_label.grid(row=0, column=0, columnspan=2, pady=(0, 20))
+        title_label.grid(row=0, column=0, columnspan=2, pady=(0, 5))
+        
+        version_label = ttk.Label(main_frame, text=f"版本 {VERSION}", font=('Arial', 9), foreground='gray')
+        version_label.grid(row=1, column=0, columnspan=2, pady=(0, 15))
         
         # 创建输入字段区域
         self.create_input_fields(main_frame)
@@ -53,7 +66,7 @@ class MailExporterGUI:
         """创建输入字段"""
         # 输入字段框架
         input_frame = ttk.LabelFrame(parent, text="邮箱配置", padding="10")
-        input_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        input_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         input_frame.columnconfigure(1, weight=1)
         
         row = 0
@@ -77,21 +90,38 @@ class MailExporterGUI:
         date_frame = ttk.Frame(input_frame)
         date_frame.grid(row=row, column=1, sticky=(tk.W, tk.E), padx=(10, 0), pady=2)
         
-        self.start_date_var = tk.StringVar()
         today = datetime.now()
         first_day = datetime(today.year, today.month, 1)
-        self.start_date_var.set(first_day.strftime("%Y-%m-%d"))
-        start_date_entry = ttk.Entry(date_frame, textvariable=self.start_date_var, width=12)
-        start_date_entry.grid(row=0, column=0)
         
-        ttk.Label(date_frame, text="至").grid(row=0, column=1, padx=5)
+        if HAS_DATE_PICKER:
+            # 使用日期选择器
+            self.start_date_picker = DateEntry(date_frame, width=12, background='darkblue',
+                                             foreground='white', borderwidth=2, date_pattern='yyyy-mm-dd')
+            self.start_date_picker.set_date(first_day)
+            self.start_date_picker.grid(row=0, column=0)
+            
+            ttk.Label(date_frame, text="至").grid(row=0, column=1, padx=5)
+            
+            self.end_date_picker = DateEntry(date_frame, width=12, background='darkblue',
+                                           foreground='white', borderwidth=2, date_pattern='yyyy-mm-dd')
+            self.end_date_picker.set_date(today)
+            self.end_date_picker.grid(row=0, column=2)
+        else:
+            # 使用普通输入框
+            self.start_date_var = tk.StringVar()
+            self.start_date_var.set(first_day.strftime("%Y-%m-%d"))
+            start_date_entry = ttk.Entry(date_frame, textvariable=self.start_date_var, width=12)
+            start_date_entry.grid(row=0, column=0)
+            
+            ttk.Label(date_frame, text="至").grid(row=0, column=1, padx=5)
+            
+            self.end_date_var = tk.StringVar()
+            self.end_date_var.set(today.strftime("%Y-%m-%d"))
+            end_date_entry = ttk.Entry(date_frame, textvariable=self.end_date_var, width=12)
+            end_date_entry.grid(row=0, column=2)
+            
+            ttk.Label(date_frame, text="(格式: YYYY-MM-DD)").grid(row=0, column=3, padx=(10, 0))
         
-        self.end_date_var = tk.StringVar()
-        self.end_date_var.set(today.strftime("%Y-%m-%d"))
-        end_date_entry = ttk.Entry(date_frame, textvariable=self.end_date_var, width=12)
-        end_date_entry.grid(row=0, column=2)
-        
-        ttk.Label(date_frame, text="(格式: YYYY-MM-DD)").grid(row=0, column=3, padx=(10, 0))
         row += 1
         
         # 邮箱文件夹
@@ -125,7 +155,7 @@ class MailExporterGUI:
     def create_progress_area(self, parent):
         """创建进度显示区域"""
         progress_frame = ttk.LabelFrame(parent, text="导出进度", padding="10")
-        progress_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        progress_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         progress_frame.columnconfigure(0, weight=1)
         
         # 进度条
@@ -141,7 +171,7 @@ class MailExporterGUI:
     def create_action_buttons(self, parent):
         """创建操作按钮"""
         button_frame = ttk.Frame(parent)
-        button_frame.grid(row=3, column=0, columnspan=2, pady=(0, 10))
+        button_frame.grid(row=4, column=0, columnspan=2, pady=(0, 10))
         
         self.start_btn = ttk.Button(button_frame, text="开始导出", command=self.start_export)
         self.start_btn.grid(row=0, column=0, padx=(0, 10))
@@ -152,7 +182,7 @@ class MailExporterGUI:
     def create_result_area(self, parent):
         """创建结果显示区域"""
         result_frame = ttk.LabelFrame(parent, text="导出日志", padding="10")
-        result_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        result_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
         result_frame.columnconfigure(0, weight=1)
         result_frame.rowconfigure(0, weight=1)
         
@@ -162,7 +192,7 @@ class MailExporterGUI:
         text_frame.columnconfigure(0, weight=1)
         text_frame.rowconfigure(0, weight=1)
         
-        self.result_text = tk.Text(text_frame, height=8, wrap=tk.WORD)
+        self.result_text = tk.Text(text_frame, height=15, wrap=tk.WORD)
         self.result_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=self.result_text.yview)
@@ -170,7 +200,7 @@ class MailExporterGUI:
         self.result_text.configure(yscrollcommand=scrollbar.set)
         
         # 配置主框架的行权重
-        parent.rowconfigure(4, weight=1)
+        parent.rowconfigure(5, weight=1)
     
     def refresh_folders(self):
         """刷新邮箱文件夹列表"""
@@ -280,8 +310,14 @@ class MailExporterGUI:
             return False
         
         try:
-            datetime.strptime(self.start_date_var.get(), "%Y-%m-%d")
-            datetime.strptime(self.end_date_var.get(), "%Y-%m-%d")
+            if HAS_DATE_PICKER:
+                # 日期选择器已经确保了正确的日期格式
+                start_date = self.start_date_picker.get_date()
+                end_date = self.end_date_picker.get_date()
+            else:
+                # 验证手动输入的日期格式
+                datetime.strptime(self.start_date_var.get(), "%Y-%m-%d")
+                datetime.strptime(self.end_date_var.get(), "%Y-%m-%d")
         except ValueError:
             messagebox.showerror("错误", "日期格式不正确，请使用YYYY-MM-DD格式")
             return False
@@ -320,8 +356,14 @@ class MailExporterGUI:
             # 获取参数
             username = self.username_var.get().strip()
             password = self.password_var.get().strip()
-            start_date = datetime.strptime(self.start_date_var.get(), "%Y-%m-%d")
-            end_date = datetime.strptime(self.end_date_var.get(), "%Y-%m-%d")
+            
+            if HAS_DATE_PICKER:
+                start_date = datetime.combine(self.start_date_picker.get_date(), datetime.min.time())
+                end_date = datetime.combine(self.end_date_picker.get_date(), datetime.min.time())
+            else:
+                start_date = datetime.strptime(self.start_date_var.get(), "%Y-%m-%d")
+                end_date = datetime.strptime(self.end_date_var.get(), "%Y-%m-%d")
+            
             output_file = self.output_var.get().strip()
             
             # 获取实际的文件夹名（从显示名映射到实际名）

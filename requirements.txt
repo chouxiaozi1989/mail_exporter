@@ -26,5 +26,14 @@
 #    - CentOS/RHEL: sudo yum install tkinter
 #    - Windows/macOS: 通常随Python安装包自带
 
-# 2. 本项目不依赖任何第三方PyPI包
-# 3. 建议使用Python 3.6或更高版本以获得最佳兼容性
+# 2. 可选依赖（用于增强用户体验）:
+# tkcalendar>=1.6.1  # 日期选择器组件，提供更好的日期输入体验
+
+# 安装可选依赖:
+# pip install tkcalendar
+
+# 3. 本项目的核心功能不依赖任何第三方PyPI包
+# 4. 建议使用Python 3.6或更高版本以获得最佳兼容性
+
+# 可选依赖包
+tkcalendar>=1.6.1

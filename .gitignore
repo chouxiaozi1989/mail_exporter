@@ -205,3 +205,31 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# 打包相关文件
+# Inno Setup输出
+Output/
+*.tmp
+
+# 图标文件（保留SVG，忽略转换后的格式）
+*.ico
+*.png
+*.jpg
+*.jpeg
+*.bmp
+
+# 临时打包文件
+temp_build/
+package_temp/
+
+# 项目特定文件
+*.csv
+config.ini
+test_*.py
+temp/
+tmp/
+
+# 测试和调试文件
+test_folder_encoding.py
+generate_imap_utf7.py
+debug_*.py

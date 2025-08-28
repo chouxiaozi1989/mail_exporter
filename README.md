@@ -161,6 +161,47 @@ python mail_exporter.py -u your_email@163.com -p your_password -f "Sent Messages
 - 图形界面：查看底部的日志区域
 - 命令行：查看终端输出的详细信息
 
+## 📦 打包和分发
+
+### 创建可执行文件
+
+项目提供了完整的打包配置，可以将Python程序打包成Windows可执行文件和安装程序。
+
+#### 快速打包
+
+```bash
+# 使用自动打包脚本
+build.bat
+
+# 或使用Python配置脚本
+python build_config.py
+```
+
+#### 手动打包
+
+```bash
+# 安装PyInstaller
+pip install pyinstaller
+
+# 打包GUI程序
+pyinstaller --onefile --windowed --name="mail_exporter_gui" mail_exporter_gui.py
+
+# 打包命令行程序
+pyinstaller --onefile --name="mail_exporter" mail_exporter.py
+```
+
+### 创建安装程序
+
+使用Inno Setup创建Windows安装程序：
+
+1. 下载并安装 [Inno Setup](https://jrsoftware.org/isinfo.php)
+2. 运行编译命令：
+   ```bash
+   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" setup.iss
+   ```
+
+详细的打包说明请参考 [BUILD.md](BUILD.md) 文档。
+
 ## 更新日志
 
 ### v1.2.0
@@ -178,6 +219,7 @@ python mail_exporter.py -u your_email@163.com -p your_password -f "Sent Messages
 - 🎉 初始版本发布
 - 📧 基本邮件导出功能
 - 📊 CSV格式输出
+- 📦 添加完整的打包配置和安装程序支持
 
 ## 贡献
 
