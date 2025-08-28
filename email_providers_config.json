@@ -1,0 +1,66 @@
+{
+  "providers": {
+    "163": {
+      "name": "163",
+      "display_name": "163邮箱",
+      "imap_server": "imap.163.com",
+      "imap_port": 993,
+      "use_ssl": true,
+      "auth_type": "password",
+      "domain_patterns": ["163.com", "126.com", "yeah.net"],
+      "description": "网易163邮箱服务",
+      "setup_instructions": "使用邮箱密码或客户端授权码登录"
+    },
+    "gmail": {
+      "name": "gmail",
+      "display_name": "Gmail",
+      "imap_server": "imap.gmail.com",
+      "imap_port": 993,
+      "use_ssl": true,
+      "auth_type": "app_password",
+      "domain_patterns": ["gmail.com", "googlemail.com"],
+      "description": "Google Gmail邮箱服务",
+      "setup_instructions": "需要开启两步验证并生成应用专用密码"
+    },
+    "qq": {
+      "name": "qq",
+      "display_name": "QQ邮箱",
+      "imap_server": "imap.qq.com",
+      "imap_port": 993,
+      "use_ssl": true,
+      "auth_type": "app_password",
+      "domain_patterns": ["qq.com", "foxmail.com"],
+      "description": "腾讯QQ邮箱服务",
+      "setup_instructions": "需要开启IMAP服务并使用授权码登录"
+    },
+    "outlook": {
+      "name": "outlook",
+      "display_name": "Outlook/Hotmail",
+      "imap_server": "outlook.office365.com",
+      "imap_port": 993,
+      "use_ssl": true,
+      "auth_type": "app_password",
+      "domain_patterns": ["outlook.com", "hotmail.com", "live.com", "msn.com"],
+      "description": "微软Outlook邮箱服务",
+      "setup_instructions": "需要开启两步验证并生成应用密码"
+    },
+    "yahoo": {
+      "name": "yahoo",
+      "display_name": "Yahoo Mail",
+      "imap_server": "imap.mail.yahoo.com",
+      "imap_port": 993,
+      "use_ssl": true,
+      "auth_type": "app_password",
+      "domain_patterns": ["yahoo.com", "yahoo.cn", "ymail.com"],
+      "description": "雅虎邮箱服务",
+      "setup_instructions": "需要开启两步验证并生成应用密码"
+    }
+  },
+  "default_settings": {
+    "imap_port": 993,
+    "use_ssl": true,
+    "timeout": 30
+  },
+  "version": "1.0",
+  "description": "邮件提供商配置文件"
+}

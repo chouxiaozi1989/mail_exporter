@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import threading
 import queue
 import os
-from mail_exporter import fetch_emails, get_mail_folders
+from mail_exporter import fetch_emails, get_mail_folders, get_supported_providers, fetch_emails_incremental
 
 # 尝试导入日期选择器，如果没有安装则使用普通输入框
 try:
@@ -19,7 +19,7 @@ VERSION = "1.2.0"
 class MailExporterGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("163邮箱邮件导出工具")
+        self.root.title("邮箱邮件导出工具")
         self.root.geometry("700x650")
         self.root.resizable(True, True)
         
@@ -27,6 +27,7 @@ class MailExporterGUI:
         self.message_queue = queue.Queue()
         self.export_thread = None
         self.is_exporting = False
+        self.stop_requested = False
         self.folder_mapping = {}  # 文件夹显示名到实际名的映射
         
         self.setup_ui()
@@ -70,6 +71,26 @@ class MailExporterGUI:
         input_frame.columnconfigure(1, weight=1)
         
         row = 0
+        
+        # 邮箱服务提供商
+        ttk.Label(input_frame, text="邮箱服务商:").grid(row=row, column=0, sticky=tk.W, pady=2)
+        self.provider_var = tk.StringVar()
+        provider_frame = ttk.Frame(input_frame)
+        provider_frame.grid(row=row, column=1, sticky=(tk.W, tk.E), padx=(10, 0), pady=2)
+        provider_frame.columnconfigure(0, weight=1)
+        
+        # 获取支持的邮箱服务提供商
+        try:
+            providers = get_supported_providers()
+            provider_values = [f"{name} ({display})" for name, display in providers]
+        except:
+            provider_values = ["163 (网易邮箱)", "gmail (Gmail)", "qq (QQ邮箱)", "outlook (Outlook)", "yahoo (Yahoo)"]
+        
+        self.provider_combobox = ttk.Combobox(provider_frame, textvariable=self.provider_var, 
+                                            values=provider_values, state="readonly", width=25)
+        self.provider_combobox.grid(row=0, column=0, sticky=(tk.W, tk.E))
+        self.provider_combobox.set(provider_values[0])  # 默认选择第一个
+        row += 1
         
         # 用户名
         ttk.Label(input_frame, text="邮箱用户名:").grid(row=row, column=0, sticky=tk.W, pady=2)
@@ -208,7 +229,7 @@ class MailExporterGUI:
         self.start_btn = ttk.Button(button_frame, text="开始导出", command=self.start_export)
         self.start_btn.grid(row=0, column=0, padx=(0, 10))
         
-        self.cancel_btn = ttk.Button(button_frame, text="取消", command=self.cancel_export, state="disabled")
+        self.cancel_btn = ttk.Button(button_frame, text="停止", command=self.cancel_export, state="disabled")
         self.cancel_btn.grid(row=0, column=1)
     
     def create_result_area(self, parent):
@@ -238,10 +259,18 @@ class MailExporterGUI:
         """刷新邮箱文件夹列表"""
         username = self.username_var.get().strip()
         password = self.password_var.get().strip()
+        provider_text = self.provider_var.get().strip()
         
         if not username or not password:
             messagebox.showwarning("提示", "请先输入邮箱用户名和密码")
             return
+        
+        if not provider_text:
+            messagebox.showwarning("提示", "请选择邮箱服务商")
+            return
+        
+        # 从显示文本中提取provider名称
+        provider = provider_text.split(' (')[0] if ' (' in provider_text else provider_text
         
         # 显示加载状态
         original_text = self.folder_combobox['state']
@@ -250,7 +279,7 @@ class MailExporterGUI:
         
         def get_folders_worker():
             try:
-                folders = get_mail_folders(username, password)
+                folders = get_mail_folders(username, password, provider)
                 
                 # 更新下拉列表
                 folder_values = []
@@ -324,7 +353,7 @@ class MailExporterGUI:
         if not self.validate_inputs():
             return
         
-        # 禁用开始按钮，启用取消按钮
+        # 禁用开始按钮，启用停止按钮
         self.start_btn.config(state="disabled")
         self.cancel_btn.config(state="normal")
         self.is_exporting = True
@@ -332,8 +361,9 @@ class MailExporterGUI:
         # 清空结果文本
         self.result_text.delete(1.0, tk.END)
         
-        # 重置进度
+        # 重置进度和停止标志
         self.progress_var.set(0)
+        self.stop_requested = False
         self.status_var.set("正在连接邮箱服务器...")
         
         # 启动导出线程
@@ -341,12 +371,10 @@ class MailExporterGUI:
         self.export_thread.start()
     
     def cancel_export(self):
-        """取消导出"""
-        self.is_exporting = False
-        self.start_btn.config(state="normal")
-        self.cancel_btn.config(state="disabled")
-        self.status_var.set("已取消")
-        self.log_message("导出已取消")
+        """停止导出"""
+        self.stop_requested = True
+        self.log_message("正在停止导出，请稍候...")
+        self.status_var.set("正在停止...")
     
     def validate_inputs(self):
         """验证输入"""
@@ -405,6 +433,10 @@ class MailExporterGUI:
             # 获取参数
             username = self.username_var.get().strip()
             password = self.password_var.get().strip()
+            provider_text = self.provider_var.get().strip()
+            
+            # 从显示文本中提取provider名称
+            provider = provider_text.split(' (')[0] if ' (' in provider_text else provider_text
             
             if HAS_DATE_PICKER:
                 start_date = datetime.combine(self.start_date_picker.get_date(), datetime.min.time())
@@ -429,6 +461,7 @@ class MailExporterGUI:
             
             # 发送开始消息
             self.message_queue.put(("log", f"开始导出邮件..."))
+            self.message_queue.put(("log", f"邮箱服务商: {provider}"))
             self.message_queue.put(("log", f"用户: {username}"))
             self.message_queue.put(("log", f"时间范围: {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}"))
             self.message_queue.put(("log", f"输出文件: {output_file}"))
@@ -442,19 +475,28 @@ class MailExporterGUI:
             else:
                 self.message_queue.put(("log", "不下载附件"))
             
-            # 调用导出函数，传入进度回调和附件参数
-            email_count = fetch_emails(username, password, start_date, end_date, output_file, folder, 
-                                     self.progress_callback, download_attachments, attachment_folder)
+            # 调用增量导出函数，传入进度回调、附件参数和停止标志
+            email_count = fetch_emails_incremental(username, password, start_date, end_date, output_file, folder, 
+                                                  self.progress_callback, download_attachments, attachment_folder, 
+                                                  provider, lambda: self.stop_requested)
             
             if self.is_exporting:
-                self.message_queue.put(("success", f"导出完成! 共导出 {email_count} 封邮件到 {output_file}"))
-                self.message_queue.put(("progress", 100))
-                self.message_queue.put(("status", "导出完成"))
+                if self.stop_requested:
+                    self.message_queue.put(("success", f"导出已停止! 共导出 {email_count} 封邮件到 {output_file}"))
+                    self.message_queue.put(("status", "已停止"))
+                else:
+                    self.message_queue.put(("success", f"导出完成! 共导出 {email_count} 封邮件到 {output_file}"))
+                    self.message_queue.put(("progress", 100))
+                    self.message_queue.put(("status", "导出完成"))
             
         except Exception as e:
             if self.is_exporting:
-                self.message_queue.put(("error", f"导出失败: {str(e)}"))
-                self.message_queue.put(("status", "导出失败"))
+                if self.stop_requested:
+                    self.message_queue.put(("error", f"导出已停止: {str(e)}"))
+                    self.message_queue.put(("status", "已停止"))
+                else:
+                    self.message_queue.put(("error", f"导出失败: {str(e)}"))
+                    self.message_queue.put(("status", "导出失败"))
         finally:
             if self.is_exporting:
                 self.message_queue.put(("finished", None))
@@ -487,8 +529,9 @@ class MailExporterGUI:
                     self.start_btn.config(state="normal")
                     self.cancel_btn.config(state="disabled")
                     self.is_exporting = False
-                    # 如果没有错误，确保进度条显示完成
-                    if self.progress_var.get() > 0:
+                    self.stop_requested = False
+                    # 如果没有错误且未被停止，确保进度条显示完成
+                    if self.progress_var.get() > 0 and not self.stop_requested:
                         self.progress_var.set(100)
                 
         except queue.Empty:

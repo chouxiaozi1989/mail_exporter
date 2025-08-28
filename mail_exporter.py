@@ -1,718 +1,242 @@
-import imaplib
-import email
-import email.header
-from email.utils import parsedate_to_datetime
-import csv
-import re
-import locale
-import time
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+邮件导出工具 - 重构版本
+支持多种邮箱服务提供商（163、Gmail、QQ等）
+"""
+
 import argparse
 import getpass
 import sys
-import base64
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
+from email_providers import EmailProviders
+from mail_client import MailClient
 
-def decode_imap_utf7(text):
-    """解码IMAP UTF-7编码的文件夹名称
-    
-    Args:
-        text: IMAP UTF-7编码的文本
-        
-    Returns:
-        解码后的Unicode文本
-    """
-    # 直接使用手动实现，更可靠
-    return _manual_decode_imap_utf7(text)
-
-def _manual_decode_imap_utf7(text):
-    """手动实现IMAP UTF-7解码（备用方案）"""
-    result = []
-    i = 0
-    while i < len(text):
-        if text[i] == '&':
-            if i + 1 < len(text) and text[i + 1] == '-':
-                # &- 表示字面量 &
-                result.append('&')
-                i += 2
-            else:
-                # 查找编码序列的结束
-                end = text.find('-', i + 1)
-                if end == -1:
-                    # 没有找到结束符，直接添加剩余字符
-                    result.append(text[i:])
-                    break
-                
-                # 提取编码部分
-                encoded = text[i + 1:end]
-                if encoded:
-                    try:
-                        # IMAP UTF-7使用修改版的base64编码
-                        # 替换字符：+ -> /, , -> +
-                        encoded = encoded.replace(',', '+')
-                        
-                        # 添加必要的padding
-                        while len(encoded) % 4 != 0:
-                            encoded += '='
-                        
-                        # base64解码
-                        decoded_bytes = base64.b64decode(encoded)
-                        # UTF-16BE解码
-                        decoded_text = decoded_bytes.decode('utf-16be')
-                        result.append(decoded_text)
-                    except Exception:
-                        # 解码失败，保持原始文本
-                        result.append(text[i:end + 1])
-                else:
-                    # 空编码序列，跳过
-                    pass
-                
-                i = end + 1
-        else:
-            result.append(text[i])
-            i += 1
-    
-    return ''.join(result)
-
-def get_mail_folders(username, password):
-    """获取邮箱中所有文件夹列表
-    
-    Args:
-        username: 163邮箱用户名
-        password: 163邮箱密码或授权码
+def get_supported_providers():
+    """获取支持的邮箱服务提供商列表
     
     Returns:
-        文件夹列表，格式为 [(folder_name, folder_display_name), ...]
+        支持的提供商列表
     """
-    folders = []
-    mail = None
+    providers = EmailProviders()
+    return providers.get_all_providers()
+
+def get_mail_folders(username, password, provider=None):
+    """获取邮箱文件夹列表"""
     try:
-        # 连接163邮箱IMAP服务器
-        mail = imaplib.IMAP4_SSL(host='imap.163.com', port=993)
-        mail.login(username, password)
+        # 使用MailClient获取文件夹列表
+        if provider:
+            client = MailClient(provider_name=provider)
+        else:
+            client = MailClient(email_address=username)
+        client.connect(username, password)
+        folders = client.get_folders()
+        client.disconnect()
+        return folders
+    except Exception as e:
+        raise Exception(f"获取文件夹列表失败: {str(e)}")
+
+def fetch_emails(username, password, start_date, end_date, output_file, folder="INBOX", 
+                progress_callback=None, download_attachments=False, attachment_folder=None, provider=None):
+    """从邮箱获取邮件并导出"""
+    try:
+        # 使用MailClient进行邮件获取和导出
+        if provider:
+            client = MailClient(provider_name=provider)
+        else:
+            client = MailClient(email_address=username)
+        client.connect(username, password)
         
-        # 获取所有文件夹
-        status, folder_list = mail.list()
+        email_count = client.fetch_emails_batch(
+            start_date=start_date,
+            end_date=end_date,
+            output_file=output_file,
+            folder=folder,
+            download_attachments=download_attachments,
+            attachment_folder=attachment_folder,
+            progress_callback=progress_callback
+        )
         
-        if status == 'OK':
-            for folder_info in folder_list:
-                # 解析文件夹信息
-                # 格式通常为: (\HasNoChildren) "." "INBOX"
-                # 尝试多种编码方式解码文件夹信息
-                folder_str = None
-                for encoding in ['utf-8', 'gb2312', 'gbk', 'latin1']:
-                    try:
-                        folder_str = folder_info.decode(encoding)
-                        break
-                    except UnicodeDecodeError:
-                        continue
-                
-                if folder_str is None:
-                    # 如果所有编码都失败，使用错误处理方式
-                    folder_str = folder_info.decode('utf-8', errors='ignore')
-                
-                # 提取文件夹名称（最后一个引号内的内容）
-                match = re.search(r'"([^"]+)"\s*$', folder_str)
-                if match:
-                    folder_name = match.group(1)
-                    
-                    # 如果文件夹名称包含IMAP UTF-7编码字符，进行解码
-                    if '&' in folder_name:
-                        try:
-                            folder_name = decode_imap_utf7(folder_name)
-                        except:
-                            pass  # 如果解码失败，保持原始名称
-                    
-                    # 创建显示名称（中文化常见文件夹名）
-                    display_name = folder_name
-                    folder_mapping = {
-                        'INBOX': '收件箱',
-                        'Sent Messages': '已发送',
-                        'Sent': '已发送', 
-                        'Drafts': '草稿箱',
-                        'Deleted Messages': '已删除',
-                        'Trash': '垃圾箱',
-                        'Junk': '垃圾邮件',
-                        'Spam': '垃圾邮件'
-                    }
-                    
-                    if folder_name in folder_mapping:
-                        display_name = f"{folder_mapping[folder_name]} ({folder_name})"
-                    
-                    folders.append((folder_name, display_name))
-        
-        # 确保INBOX在第一位
-        folders.sort(key=lambda x: (x[0] != 'INBOX', x[1]))
+        client.disconnect()
+        return email_count
         
     except Exception as e:
-        raise Exception(f"获取文件夹列表失败: {e}")
-    finally:
-        if mail:
-            try:
-                mail.logout()
-            except:
-                pass
-    
-    return folders
+        raise Exception(f"邮件导出失败: {str(e)}")
 
-def fetch_emails(username, password, start_date, end_date, output_csv, folder="INBOX", progress_callback=None, download_attachments=False, attachment_folder=None):
-    """从163邮箱获取指定时间段的邮件并导出为CSV
-    
-    Args:
-        username: 163邮箱用户名
-        password: 163邮箱密码或授权码
-        start_date: 开始日期，datetime对象
-        end_date: 结束日期，datetime对象
-        output_csv: 输出CSV文件路径
-        folder: 邮箱文件夹，默认为INBOX
-        progress_callback: 进度回调函数，接收(current, total, message)参数
-        download_attachments: 是否下载附件，默认为False
-        attachment_folder: 附件保存文件夹路径，如果为None则使用默认路径
-    
-    Returns:
-        导出的邮件数量
-    """
-    email_count = 0
-    
-    # 初始化附件文件夹
-    if download_attachments:
-        if attachment_folder is None:
-            # 使用CSV文件同目录下的attachments文件夹
-            csv_dir = os.path.dirname(os.path.abspath(output_csv))
-            attachment_folder = os.path.join(csv_dir, 'attachments')
-        
-        # 创建附件文件夹
-        if not os.path.exists(attachment_folder):
-            os.makedirs(attachment_folder)
-            if progress_callback:
-                progress_callback(0, 0, f"创建附件文件夹: {attachment_folder}")
-    
+def fetch_emails_incremental(username, password, start_date, end_date, output_file, folder="INBOX", 
+                            progress_callback=None, download_attachments=False, attachment_folder=None, 
+                            provider=None, stop_flag=None):
+    """从邮箱增量获取邮件并导出（支持按条写入和停止保存）"""
     try:
-        # 连接163邮箱IMAP服务器
-        mail = imaplib.IMAP4_SSL(host='imap.163.com', port=993)
-        mail.login(username, password)
-        
-        # 客户端标识（可选）
-        imaplib.Commands["ID"] = ('AUTH',)
-        args = ("name", username, "contact", username, "version", "1.0.0", "vendor", "myclient")
-        mail._simple_command("ID", str(args).replace(",", "").replace("\'", "\""))
-        
-        # 选择收件箱
-        mail.select(folder)
-        
-        # 格式化日期查询条件 - 强制使用英文locale避免本地化问题
-        old_locale = locale.getlocale(locale.LC_TIME)
-        try:
-            # 强制使用C locale确保英文月份缩写
-            locale.setlocale(locale.LC_TIME, 'C')
-            date_format = '%d-%b-%Y'
-            start_date_str = start_date.strftime(date_format)
-            end_date_str = (end_date + timedelta(days=1)).strftime(date_format)
-            date_query = f'(SINCE "{start_date_str}" BEFORE "{end_date_str}")'
-            
-            if progress_callback:
-                progress_callback(0, 0, f"查询条件: {date_query}")
-            else:
-                print(f"查询条件: {date_query}")
-        finally:
-            # 恢复原始locale
-            try:
-                if old_locale[0]:
-                    locale.setlocale(locale.LC_TIME, old_locale)
-                else:
-                    locale.setlocale(locale.LC_TIME, '')
-            except:
-                pass
-        
-        # 搜索邮件 - 使用分批获取解决数量限制
-        if progress_callback:
-            progress_callback(0, 0, f"开始搜索邮件，查询条件: {date_query}")
+        # 使用MailClient进行邮件获取和导出
+        if provider:
+            client = MailClient(provider_name=provider)
         else:
-            print(f"开始搜索邮件，查询条件: {date_query}")
+            client = MailClient(email_address=username)
+        client.connect(username, password)
         
-        status, messages = mail.search(None, date_query)
+        email_count = client.fetch_emails_incremental(
+            start_date=start_date,
+            end_date=end_date,
+            output_file=output_file,
+            folder=folder,
+            download_attachments=download_attachments,
+            attachment_folder=attachment_folder,
+            progress_callback=progress_callback,
+            stop_flag=stop_flag
+        )
         
-        # 详细的调试信息
-        if progress_callback:
-            progress_callback(0, 0, f"IMAP搜索状态: {status}, 响应类型: {type(messages)}, 响应长度: {len(messages) if messages else 0}")
-        else:
-            print(f"IMAP搜索状态: {status}, 响应类型: {type(messages)}, 响应长度: {len(messages) if messages else 0}")
+        client.disconnect()
+        return email_count
         
-        if status != 'OK':
-            error_detail = f"搜索邮件失败 - 状态: {status}, 响应: {messages}"
-            if progress_callback:
-                progress_callback(0, 0, error_detail)
-            else:
-                print(error_detail)
-            raise Exception(error_detail)
-        
-        # 获取所有邮件ID
-        if messages and messages[0]:
-            all_message_ids = messages[0].split()
-            if progress_callback:
-                progress_callback(0, 0, f"原始响应: {messages[0][:200]}{'...' if len(messages[0]) > 200 else ''}")
-            else:
-                print(f"原始响应: {messages[0][:200]}{'...' if len(messages[0]) > 200 else ''}")
-        else:
-            all_message_ids = []
-            if progress_callback:
-                progress_callback(0, 0, "警告: IMAP搜索返回空响应")
-            else:
-                print("警告: IMAP搜索返回空响应")
-        
-        total_emails = len(all_message_ids)
-        
-        if progress_callback:
-            progress_callback(0, total_emails, f"找到 {total_emails} 封邮件，开始处理...")
-        else:
-            print(f"找到 {total_emails} 封邮件，开始处理...")
-        
-        # 如果没有邮件，直接返回
-        if total_emails == 0:
-            if progress_callback:
-                progress_callback(0, 0, "未找到符合条件的邮件")
-                progress_callback(0, 0, "导出完成 - 没有符合条件的邮件")
-            else:
-                print("未找到符合条件的邮件")
-            return 0
-
-        # 准备CSV文件
-        with open(output_csv, 'w', newline='', encoding='utf-8') as csvfile:
-            writer = csv.writer(csvfile)
-            if download_attachments:
-                writer.writerow(['日期', '发件人', '主题', '内容', '附件数量', '附件列表'])
-            else:
-                writer.writerow(['日期', '发件人', '主题', '内容'])
-
-            # 分批处理邮件，避免内存问题和服务器限制
-            batch_size = 50  # 每批处理50封邮件
-            processed_count = 0
-            
-            for batch_start in range(0, total_emails, batch_size):
-                batch_end = min(batch_start + batch_size, total_emails)
-                batch_ids = all_message_ids[batch_start:batch_end]
-                
-                if progress_callback:
-                    progress_callback(processed_count, total_emails, f"处理第 {batch_start//batch_size + 1} 批邮件 ({len(batch_ids)} 封)")
-                else:
-                    print(f"\n处理第 {batch_start//batch_size + 1} 批邮件 ({len(batch_ids)} 封)...")
-                
-                # 处理当前批次的邮件
-                for i, num in enumerate(batch_ids, 1):
-                    global_index = processed_count + i
-                    
-                    # 添加重试机制
-                    max_retries = 3
-                    retry_count = 0
-                    status = 'NO'  # 初始化status变量
-                    
-                    while retry_count < max_retries:
-                        try:
-                            status, data = mail.fetch(num, '(RFC822)')
-                            if status == 'OK':
-                                break
-                            else:
-                                retry_count += 1
-                                if retry_count < max_retries:
-                                    time.sleep(0.5)  # 等待0.5秒后重试
-                                    continue
-                                else:
-                                    if progress_callback:
-                                        progress_callback(global_index, total_emails, f"跳过邮件 {num} (获取失败)")
-                                    else:
-                                        print(f"\n警告: 跳过邮件 {num} (获取失败)")
-                                    continue
-                        except Exception as e:
-                            retry_count += 1
-                            if retry_count < max_retries:
-                                time.sleep(0.5)
-                                continue
-                            else:
-                                if progress_callback:
-                                    progress_callback(global_index, total_emails, f"跳过邮件 {num} (错误: {str(e)[:50]})")
-                                else:
-                                    print(f"\n警告: 跳过邮件 {num} (错误: {str(e)[:50]})")
-                                break
-                    
-                    if status != 'OK':
-                        continue
-
-                    msg = email.message_from_bytes(data[0][1])
-                    # 解析日期
-                    try:
-                        date_str = msg['Date']
-                        if date_str:
-                            # 尝试解析各种可能的日期格式
-                            date = parsedate_to_datetime(date_str).strftime('%Y-%m-%d %H:%M:%S')
-                        else:
-                            date = "[未知日期]"
-                    except Exception as e:
-                        print(f"解析日期失败: {msg['Date']} - {e}")
-                        date = msg['Date'] if msg['Date'] else "[日期解析错误]"
-                    from_ = get_mail_from(msg['From'])
-                    subject = decode_subject(msg['Subject'])
-                    
-                    # 获取邮件内容
-                    body = ""
-                    if msg.is_multipart():
-                        # 如果邮件包含多个部分，尝试找到文本部分
-                        for part in msg.walk():
-                            content_type = part.get_content_type()
-                            content_disposition = str(part.get("Content-Disposition"))
-                            
-                            # 跳过附件
-                            if "attachment" in content_disposition:
-                                continue
-                            
-                            # 尝试获取文本内容
-                            if content_type == "text/plain":
-                                try:
-                                    charset = part.get_content_charset() or 'utf-8'
-                                    payload = part.get_payload(decode=True)
-                                    if payload:
-                                        try:
-                                            body = payload.decode(charset, errors='replace')
-                                        except (LookupError, UnicodeDecodeError):
-                                            body = payload.decode('utf-8', errors='replace')
-                                        break
-                                except Exception as e:
-                                    print(f"解析邮件内容失败: {e}")
-                                    body = "[邮件内容解析错误]"
-                    else:
-                        # 如果邮件只有一个部分
-                        try:
-                            charset = msg.get_content_charset() or 'utf-8'
-                            payload = msg.get_payload(decode=True)
-                            if payload:
-                                try:
-                                    body = payload.decode(charset, errors='replace')
-                                except (LookupError, UnicodeDecodeError):
-                                    body = payload.decode('utf-8', errors='replace')
-                            else:
-                                body = "[空内容]"
-                        except Exception as e:
-                            print(f"解析邮件内容失败: {e}")
-                            body = "[邮件内容解析错误]"
-                    
-                    # 处理附件（如果启用）
-                    attachment_count = 0
-                    attachment_files = []
-                    if download_attachments:
-                        attachment_count, attachment_files = process_attachments(
-                            msg, attachment_folder, processed_count + 1, progress_callback
-                        )
-                    
-                    # 写入CSV文件 - 对所有邮件都执行
-                    if download_attachments:
-                        attachment_list = '; '.join(attachment_files) if attachment_files else '无附件'
-                        writer.writerow([date, from_, subject, body, attachment_count, attachment_list])
-                    else:
-                        writer.writerow([date, from_, subject, body])
-                    
-                    email_count += 1
-                    processed_count += 1  # 每处理完一封邮件就更新计数
-                    
-                    # 显示处理进度
-                    if total_emails > 0:
-                        progress = (processed_count / total_emails) * 100
-                        if progress_callback:
-                            progress_callback(processed_count, total_emails, f"正在处理: {subject[:30]}{'...' if len(subject) > 30 else ''}")
-                        else:
-                            # 创建进度条
-                            bar_length = 30
-                            filled_length = int(bar_length * processed_count // total_emails)
-                            bar = '=' * filled_length + '-' * (bar_length - filled_length)
-                            print(f"\r进度: [{bar}] {processed_count}/{total_emails} ({progress:.1f}%) - {subject[:25]}{'...' if len(subject) > 25 else ''}", end='', flush=True)
-                
-                # 批次处理完成后的休息和连接保活
-                if batch_end < total_emails:
-                    time.sleep(0.1)  # 批次间短暂休息
-                    
-                    # 每处理10批邮件后发送NOOP命令保持连接
-                    if (batch_start // batch_size + 1) % 10 == 0:
-                        try:
-                            mail.noop()  # 保持连接活跃
-                            if progress_callback:
-                                progress_callback(processed_count, total_emails, "保持连接活跃...")
-                        except Exception as e:
-                            if progress_callback:
-                                progress_callback(processed_count, total_emails, f"连接保活失败: {str(e)[:50]}")
-                            else:
-                                print(f"\n警告: 连接保活失败: {str(e)[:50]}")
-    
-    except imaplib.IMAP4.error as e:
-        error_msg = f"IMAP错误: {e}"
-        if progress_callback:
-            progress_callback(0, 0, error_msg)
-        else:
-            print(error_msg)
-        raise
     except Exception as e:
-        error_msg = f"发生错误: {e}"
-        if progress_callback:
-            progress_callback(0, 0, error_msg)
-        else:
-            print(error_msg)
-        raise
-    finally:
-        try:
-            mail.close()
-            mail.logout()
-        except:
-            pass
-    
-    # 确保进度显示后换行
-    if not progress_callback:
-        if email_count > 0:
-            print()  # 换行
-        print(f"成功导出 {email_count} 封邮件到 {output_csv}")
-    else:
-        # 确保进度回调显示完成状态
-        if email_count > 0:
-            progress_callback(email_count, email_count, f"导出完成 - 共处理 {email_count} 封邮件")
-    return email_count
+        raise Exception(f"增量邮件导出失败: {str(e)}")
 
-def process_attachments(msg, attachment_folder, email_index, progress_callback=None):
-    """处理邮件附件
-    
-    Args:
-        msg: 邮件消息对象
-        attachment_folder: 附件保存文件夹
-        email_index: 邮件索引，用于创建唯一文件夹
-        progress_callback: 进度回调函数
-    
-    Returns:
-        tuple: (附件数量, 附件文件列表)
-    """
-    attachment_count = 0
-    attachment_files = []
-    
-    if not msg.is_multipart():
-        return attachment_count, attachment_files
-    
-    # 为当前邮件创建子文件夹
-    email_attachment_folder = os.path.join(attachment_folder, f"email_{email_index}")
-    
-    for part in msg.walk():
-        content_disposition = str(part.get("Content-Disposition", ""))
-        
-        # 检查是否为附件
-        if "attachment" in content_disposition:
-            filename = part.get_filename()
-            if filename:
-                try:
-                    # 解码文件名
-                    if filename.startswith('=?') and filename.endswith('?='):
-                        decoded_parts = email.header.decode_header(filename)
-                        filename_str = ""
-                        for part_data, charset in decoded_parts:
-                            if isinstance(part_data, bytes):
-                                if charset:
-                                    try:
-                                        filename_str += part_data.decode(charset, errors='ignore')
-                                    except (LookupError, UnicodeDecodeError):
-                                        filename_str += part_data.decode('utf-8', errors='ignore')
-                                else:
-                                    filename_str += part_data.decode('utf-8', errors='ignore')
-                            else:
-                                filename_str += part_data
-                        filename = filename_str
-                    
-                    # 创建邮件附件文件夹
-                    if not os.path.exists(email_attachment_folder):
-                        os.makedirs(email_attachment_folder)
-                    
-                    # 生成安全的文件名
-                    safe_filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-                    if not safe_filename:
-                        safe_filename = f"attachment_{attachment_count + 1}"
-                    
-                    file_path = os.path.join(email_attachment_folder, safe_filename)
-                    
-                    # 如果文件已存在，添加数字后缀
-                    counter = 1
-                    original_path = file_path
-                    while os.path.exists(file_path):
-                        name, ext = os.path.splitext(original_path)
-                        file_path = f"{name}_{counter}{ext}"
-                        counter += 1
-                    
-                    # 保存附件
-                    payload = part.get_payload(decode=True)
-                    if payload:
-                        with open(file_path, 'wb') as f:
-                            f.write(payload)
-                        
-                        attachment_count += 1
-                        attachment_files.append(os.path.relpath(file_path, attachment_folder))
-                        
-                        if progress_callback:
-                            progress_callback(0, 0, f"保存附件: {safe_filename}")
-                        
-                except Exception as e:
-                    if progress_callback:
-                        progress_callback(0, 0, f"保存附件失败: {filename} - {str(e)[:50]}")
-                    else:
-                        print(f"保存附件失败: {filename} - {str(e)[:50]}")
-    
-    return attachment_count, attachment_files
+# 邮件处理函数已移至模块化文件中
 
-def decode_subject(subject):
-    """解码邮件主题
-    
-    Args:
-        subject: 原始邮件主题
-        
-    Returns:
-        解码后的主题字符串
-    """
-    if subject:
-        try:
-            # 尝试解码 Subject
-            decoded_parts = email.header.decode_header(subject)
-            subject_str = ""
-            for part, charset in decoded_parts:
-                if isinstance(part, bytes):
-                    # 优先使用返回的编码集，如果不可用则使用utf-8
-                    if charset:
-                        try:
-                            subject_str += part.decode(charset, errors='ignore')
-                        except (LookupError, UnicodeDecodeError):
-                            subject_str += part.decode('utf-8', errors='ignore')
-                    else:
-                        subject_str += part.decode('utf-8', errors='ignore')
-                else:
-                    subject_str += part
-            return subject_str
-        except Exception as e:
-            print(f"解码主题失败: {subject} - {e}")
-            return subject
-    else:
-        return "[无主题]"
+# decode_subject 函数已移至模块化文件中
 
-def get_mail_from(from_):
-    """解析邮件发件人信息
-    
-    Args:
-        from_: 原始发件人头信息
-        
-    Returns:
-        发件人邮箱地址
-    """
-    if from_:
-        try:
-            # 解析发件人信息
-            decoded_parts = email.header.decode_header(from_)
-            from_str = ""
-            for part, charset in decoded_parts:
-                if isinstance(part, bytes):
-                    # 优先使用返回的编码集，如果不可用则使用utf-8
-                    if charset:
-                        try:
-                            from_str += part.decode(charset, errors='ignore')
-                        except (LookupError, UnicodeDecodeError):
-                            from_str += part.decode('utf-8', errors='ignore')
-                    else:
-                        from_str += part.decode('utf-8', errors='ignore')
-                else:
-                    from_str += part
-            
-            # 提取邮箱地址
-            # 格式可能是 "姓名 <email@example.com>" 或纯邮箱地址
-            email_match = re.search(r'<([^<>]+)>', from_str)
-            if email_match:
-                # 只返回邮箱地址部分
-                return email_match.group(1).strip()
-            else:
-                # 如果没有尖括号格式，检查是否为纯邮箱地址
-                # 更宽松的邮箱正则表达式，支持更多有效格式
-                email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-                if re.match(email_pattern, from_str.strip()):
-                    return from_str.strip()
-                else:
-                    # 尝试从字符串中提取邮箱地址
-                    email_in_text = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', from_str)
-                    if email_in_text:
-                        return email_in_text.group(0)
-                    else:
-                        print(f"无法从 '{from_str}' 中提取邮箱地址")
-                        return from_str
-        except Exception as e:
-            print(f"解析发件人失败: {from_} - {e}")
-            return from_
-    else:
-        return "[未知发件人]"
+# get_mail_from 函数已移至模块化文件中
 
 
 if __name__ == "__main__":
-    # 创建命令行参数解析器
-    parser = argparse.ArgumentParser(description="163邮箱邮件导出工具")
-    parser.add_argument("-u", "--username", help="邮箱用户名")
-    parser.add_argument("-p", "--password", help="邮箱密码或授权码")
-    parser.add_argument("-s", "--start", help="开始日期 (YYYY-MM-DD)")
-    parser.add_argument("-e", "--end", help="结束日期 (YYYY-MM-DD)")
-    parser.add_argument("-o", "--output", default="emails.csv", help="输出CSV文件路径")
-    parser.add_argument("-f", "--folder", default="INBOX", help="邮箱文件夹，默认为INBOX")
-    parser.add_argument("-a", "--attachments", action="store_true", help="下载邮件附件")
-    parser.add_argument("--attachment-folder", help="附件保存文件夹路径，默认为CSV文件同目录下的attachments文件夹")
+    parser = argparse.ArgumentParser(description='从邮箱导出邮件到CSV/JSON文件，支持多种邮箱服务提供商')
+    parser.add_argument('-u', '--username', help='邮箱用户名')
+    parser.add_argument('-p', '--password', help='邮箱密码或授权码（如果不提供将提示输入）')
+    parser.add_argument('-s', '--start-date', help='开始日期 (YYYY-MM-DD)')
+    parser.add_argument('-e', '--end-date', help='结束日期 (YYYY-MM-DD)')
+    parser.add_argument('-o', '--output', help='输出文件路径（支持.csv和.json格式）')
+    parser.add_argument('-f', '--folder', default='INBOX', help='邮箱文件夹名称，默认为INBOX')
+    parser.add_argument('-a', '--attachments', action='store_true', help='下载邮件附件')
+    parser.add_argument('--attachment-folder', help='附件保存文件夹路径（默认为输出文件同目录下的attachments文件夹）')
+    parser.add_argument('--provider', help='邮箱服务提供商（163、gmail、qq、outlook、yahoo等，不指定则自动检测）')
+    parser.add_argument('--list-providers', action='store_true', help='列出支持的邮箱服务提供商')
+    parser.add_argument('--list-folders', action='store_true', help='列出邮箱中的所有文件夹')
     
     args = parser.parse_args()
     
-    # 如果没有提供用户名，提示用户输入
+    # 列出支持的提供商
+    if args.list_providers:
+        print("支持的邮箱服务提供商:")
+        providers = get_supported_providers()
+        for name, config in providers.items():
+            print(f"  {name}: {config.display_name}")
+            print(f"    IMAP服务器: {config.imap_server}:{config.imap_port}")
+            print(f"    认证类型: {config.auth_type}")
+            if config.domain_patterns:
+                print(f"    域名模式: {', '.join(config.domain_patterns)}")
+            print()
+        sys.exit(0)
+    
+    # 列出文件夹
+    if args.list_folders:
+        if not args.username:
+            parser.error("列出文件夹需要提供邮箱用户名 (-u/--username)")
+        # 如果没有提供密码，提示用户输入
+        if not args.password:
+            provider_info = ""
+            if args.provider:
+                provider_info = f"({args.provider}) "
+            args.password = getpass.getpass(f'请输入邮箱 {provider_info}密码或授权码: ')
+        try:
+            print("正在获取邮箱文件夹列表...")
+            folders = get_mail_folders(args.username, args.password, args.provider)
+            print("\n可用的邮箱文件夹:")
+            for folder_name, display_name in folders:
+                print(f"  {folder_name}: {display_name}")
+        except Exception as e:
+            print(f"获取文件夹列表失败: {e}")
+            sys.exit(1)
+        sys.exit(0)
+    
+    # 检查必需参数
     if not args.username:
-        args.username = input("请输入邮箱用户名: ")
+        parser.error("必须提供邮箱用户名 (-u/--username)")
     
-    # 如果没有提供密码，安全提示输入
+    if not args.output:
+        parser.error("必须提供输出文件路径 (-o/--output)")
+    
+    # 如果没有提供密码，提示用户输入
     if not args.password:
-        args.password = getpass.getpass("请输入邮箱密码或授权码: ")
+        provider_info = ""
+        if args.provider:
+            provider_info = f"({args.provider}) "
+        args.password = getpass.getpass(f'请输入邮箱 {provider_info}密码或授权码: ')
     
-    # 处理日期
-    try:
-        if args.start:
-            start_date = datetime.strptime(args.start, "%Y-%m-%d")
-        else:
-            # 默认为当前月份第一天
-            today = datetime.now()
-            start_date = datetime(today.year, today.month, 1)
-            
-        if args.end:
-            end_date = datetime.strptime(args.end, "%Y-%m-%d")
-        else:
-            # 默认为当前日期
-            end_date = datetime.now()
-    except ValueError as e:
-        print(f"日期格式错误: {e}")
-        print("请使用YYYY-MM-DD格式")
+    # 解析日期
+    start_date = None
+    end_date = None
+    
+    if args.start_date:
+        try:
+            start_date = datetime.strptime(args.start_date, '%Y-%m-%d')
+        except ValueError:
+            print("错误: 开始日期格式不正确，请使用 YYYY-MM-DD 格式")
+            sys.exit(1)
+    
+    if args.end_date:
+        try:
+            end_date = datetime.strptime(args.end_date, '%Y-%m-%d')
+        except ValueError:
+            print("错误: 结束日期格式不正确，请使用 YYYY-MM-DD 格式")
+            sys.exit(1)
+    
+    # 验证日期范围
+    if start_date and end_date and start_date > end_date:
+        print("错误: 开始日期不能晚于结束日期")
         sys.exit(1)
     
-    print(f"\n开始导出邮件...")
-    print(f"用户: {args.username}")
-    print(f"时间范围: {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
+    # 检测邮箱服务提供商
+    detected_provider = None
+    if not args.provider:
+        try:
+            providers = EmailProviders()
+            config = providers.get_provider_by_email(args.username)
+            if config:
+                detected_provider = config.name
+                print(f"自动检测到邮箱服务提供商: {config.display_name}")
+        except Exception:
+            pass
+    
+    # 显示配置信息
+    print(f"\n=== 邮件导出配置 ===")
+    print(f"邮箱用户名: {args.username}")
+    print(f"邮箱服务商: {args.provider or detected_provider or '自动检测'}")
+    print(f"开始日期: {args.start_date if args.start_date else '不限制'}")
+    print(f"结束日期: {args.end_date if args.end_date else '不限制'}")
     print(f"输出文件: {args.output}")
     print(f"邮箱文件夹: {args.folder}")
+    print(f"下载附件: {'是' if args.attachments else '否'}")
     if args.attachments:
-        print(f"附件下载: 启用")
-        if args.attachment_folder:
-            print(f"附件保存路径: {args.attachment_folder}")
-        else:
-            print(f"附件保存路径: 默认(CSV文件同目录下的attachments文件夹)")
-    else:
-        print(f"附件下载: 禁用")
+        attachment_folder = args.attachment_folder
+        if not attachment_folder:
+            # 使用输出文件同目录下的attachments文件夹
+            output_dir = os.path.dirname(os.path.abspath(args.output))
+            attachment_folder = os.path.join(output_dir, 'attachments')
+        print(f"附件保存路径: {attachment_folder}")
     print()
     
-    # 执行邮件导出
     try:
+        # 调用邮件获取函数
         email_count = fetch_emails(
-            args.username, args.password, start_date, end_date, args.output, args.folder,
-            download_attachments=args.attachments, attachment_folder=args.attachment_folder
+            username=args.username,
+            password=args.password,
+            start_date=start_date,
+            end_date=end_date,
+            output_file=args.output,
+            folder=args.folder,
+            download_attachments=args.attachments,
+            attachment_folder=args.attachment_folder,
+            provider=args.provider or detected_provider
         )
-        if email_count > 0:
-            print(f"\n导出完成! 共导出 {email_count} 封邮件到 {args.output}")
-            if args.attachments:
-                attachment_path = args.attachment_folder or os.path.join(os.path.dirname(os.path.abspath(args.output)), 'attachments')
-                print(f"附件已保存到: {attachment_path}")
-        else:
-            print("\n未找到符合条件的邮件")
+        
+        print(f"\n=== 导出完成 ===")
+        print(f"成功导出 {email_count} 封邮件")
+        
+    except KeyboardInterrupt:
+        print("\n用户中断操作")
+        sys.exit(1)
     except Exception as e:
-        print(f"\n导出过程中发生错误: {e}")
+        print(f"\n导出失败: {e}")
         sys.exit(1)
