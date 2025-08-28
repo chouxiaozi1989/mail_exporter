@@ -1,10 +1,10 @@
 ; Inno Setup Compiler配置文件
 ; 用于将邮件导出工具打包成Windows安装程序
 
-#define MyAppName "邮件导出工具"
-#define MyAppVersion "1.0.0"
-#define MyAppPublisher "邮件导出工具开发团队"
-#define MyAppURL "https://github.com/your-username/mail-exporter"
+#define MyAppName "163邮件导出工具"
+#define MyAppVersion "1.2.0"
+#define MyAppPublisher "chouxiaozi1989"
+#define MyAppURL "https://github.com/chouxiaozi1989/mail_exporter"
 #define MyAppExeName "mail_exporter_gui.exe"
 #define MyAppDescription "163邮箱邮件导出工具 - 支持批量导出邮件到CSV文件"
 
@@ -59,7 +59,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: quicklaunchicon
 
 [Run]
-Name: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\__pycache__"
