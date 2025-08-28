@@ -294,7 +294,6 @@ def fetch_emails(username, password, start_date, end_date, output_csv, folder="I
                             else:
                                 retry_count += 1
                                 if retry_count < max_retries:
-                                    import time
                                     time.sleep(0.5)  # 等待0.5秒后重试
                                     continue
                                 else:
