@@ -466,12 +466,10 @@ if __name__ == "__main__":
     # 如果没有提供用户名，提示用户输入
     if not args.username:
         args.username = input("请输入邮箱用户名: ")
-        # args.username = 'sdszcsb@163.com'
     
     # 如果没有提供密码，安全提示输入
     if not args.password:
         args.password = getpass.getpass("请输入邮箱密码或授权码: ")
-        # args.password = 'LLfBu9hssaME3uXf'
     
     # 处理日期
     try:
