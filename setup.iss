@@ -1,12 +1,12 @@
 ; Inno Setup Compiler配置文件
 ; 用于将邮件导出工具打包成Windows安装程序
 
-#define MyAppName "163邮件导出工具"
-#define MyAppVersion "1.2.0"
+#define MyAppName "邮件导出工具"
+#define MyAppVersion "1.3.0"
 #define MyAppPublisher "chouxiaozi1989"
 #define MyAppURL "https://github.com/chouxiaozi1989/mail_exporter"
 #define MyAppExeName "mail_exporter_gui.exe"
-#define MyAppDescription "163邮箱邮件导出工具 - 支持批量导出邮件到CSV文件"
+#define MyAppDescription "邮箱邮件导出工具 - 支持批量导出邮件到CSV文件"
 
 [Setup]
 ; 注意: AppId的值唯一标识此应用程序。
