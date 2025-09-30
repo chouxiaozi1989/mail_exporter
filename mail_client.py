@@ -15,24 +15,31 @@ from email_providers import EmailProviders, EmailProviderConfig
 from email_parser import EmailParser
 from email_exporter import EmailExporter
 from incremental_exporter import IncrementalEmailExporter
+from proxy_imap import create_imap_connection
+from oauth_gmail import GmailOAuth
 
 
 class MailClient:
     """邮件客户端类"""
     
-    def __init__(self, provider_name: str = None, email_address: str = None):
+    def __init__(self, provider_name: str = None, email_address: str = None, proxy_config: dict = None, oauth_config: dict = None):
         """
         初始化邮件客户端
         
         Args:
             provider_name: 邮箱服务提供商名称
             email_address: 邮箱地址（用于自动检测提供商）
+            proxy_config: 代理配置字典，包含type, host, port, username, password等
+            oauth_config: OAuth配置字典，包含client_id, client_secret, credentials_file等
         """
         self.providers = EmailProviders()
         self.parser = EmailParser()
         self.exporter = EmailExporter()
         self.mail = None
         self.config = None
+        self.proxy_config = proxy_config
+        self.oauth_config = oauth_config or {}
+        self.gmail_oauth = None
         
         # 确定邮箱配置
         if provider_name:
@@ -42,19 +49,44 @@ class MailClient:
         
         if not self.config:
             raise ValueError("无法确定邮箱服务提供商配置")
+        
+        # 如果提供了OAuth配置且是Gmail，设置为OAuth2认证
+        if self.oauth_config and self.config.name == 'gmail':
+            # 创建一个新的配置副本，修改认证类型
+            from dataclasses import replace
+            self.config = replace(self.config, auth_type='oauth2')
     
-    def connect(self, username: str, password: str) -> bool:
+    def connect(self, username: str, password: str = None) -> bool:
         """
         连接到邮箱服务器
         
         Args:
             username: 用户名
-            password: 密码或授权码
+            password: 密码或授权码（OAuth2时可为None）
             
         Returns:
             连接是否成功
         """
         try:
+            # 对于OAuth认证，如果没有提供用户名，尝试从OAuth获取
+            if self.config.auth_type == 'oauth2' and self.config.name == 'gmail' and not username:
+                # 初始化Gmail OAuth以获取用户邮箱
+                if not self.gmail_oauth:
+                    self.gmail_oauth = GmailOAuth(
+                        client_id=self.oauth_config.get('client_id'),
+                        client_secret=self.oauth_config.get('client_secret'),
+                        credentials_file=self.oauth_config.get('credentials_file'),
+                        token_file=self.oauth_config.get('token_file', 'gmail_token.json')
+                    )
+                
+                # 执行OAuth认证
+                if self.gmail_oauth.authenticate():
+                    username = self.gmail_oauth.get_user_email()
+                    if not username:
+                        raise ValueError("无法从OAuth令牌获取用户邮箱地址")
+                else:
+                    raise ValueError("OAuth认证失败")
+            
             # 验证邮箱地址格式
             if not self.providers.validate_email_format(username):
                 raise ValueError(f"邮箱地址格式不正确")
@@ -62,16 +94,34 @@ class MailClient:
             # 获取连接参数
             conn_params = self.providers.get_connection_params(username, self.config.name)
             
-            # 建立IMAP连接
+            # 建立IMAP连接，根据代理配置决定是否使用代理
+            should_use_proxy = self.proxy_config is not None and self.proxy_config.get('enabled', False)
+            
             if self.config.imap_port == 993:
-                self.mail = imaplib.IMAP4_SSL(host=self.config.imap_server, port=self.config.imap_port)
+                self.mail = create_imap_connection(
+                    host=self.config.imap_server, 
+                    port=self.config.imap_port,
+                    use_ssl=True,
+                    proxy_config=self.proxy_config if should_use_proxy else None
+                )
             else:
-                self.mail = imaplib.IMAP4(host=self.config.imap_server, port=self.config.imap_port)
+                self.mail = create_imap_connection(
+                    host=self.config.imap_server, 
+                    port=self.config.imap_port,
+                    use_ssl=False,
+                    proxy_config=self.proxy_config if should_use_proxy else None
+                )
                 if self.config.use_ssl:
                     self.mail.starttls()
             
-            # 登录
-            self.mail.login(username, password)
+            # 根据认证类型进行登录
+            if self.config.auth_type == 'oauth2' and self.config.name == 'gmail':
+                self._oauth_login(username)
+            else:
+                # 传统密码登录
+                if not password:
+                    raise ValueError("密码不能为空")
+                self.mail.login(username, password)
             
             # 发送客户端标识（可选，某些服务器需要）
             try:
@@ -86,6 +136,38 @@ class MailClient:
             
         except Exception as e:
             raise Exception(f"连接到 {self.config.name} 失败: {str(e)}")
+    
+    def _oauth_login(self, username: str):
+        """
+        使用OAuth2进行Gmail登录
+        
+        Args:
+            username: 邮箱地址
+        """
+        try:
+            # 初始化Gmail OAuth
+            if not self.gmail_oauth:
+                self.gmail_oauth = GmailOAuth(
+                    client_id=self.oauth_config.get('client_id'),
+                    client_secret=self.oauth_config.get('client_secret'),
+                    credentials_file=self.oauth_config.get('credentials_file'),
+                    token_file=self.oauth_config.get('token_file', 'gmail_token.json')
+                )
+            
+            # 执行OAuth认证（如果尚未认证）
+            if not self.gmail_oauth.is_authenticated():
+                if not self.gmail_oauth.authenticate():
+                    raise Exception("OAuth认证失败")
+            
+            # 使用OAuth字符串进行IMAP认证
+            oauth_string = self.gmail_oauth.get_oauth_string(username)
+            
+            # Gmail IMAP OAuth认证
+            # 使用lambda函数传递OAuth字符串
+            self.mail.authenticate('XOAUTH2', lambda x: oauth_string)
+            
+        except Exception as e:
+            raise Exception(f"OAuth登录失败: {str(e)}")
     
     def disconnect(self):
         """断开邮箱连接"""
@@ -391,7 +473,8 @@ class MailClient:
                                 attachment_folder: str = None,
                                 export_format: str = 'csv',
                                 progress_callback=None,
-                                stop_flag=None) -> int:
+                                stop_flag=None,
+                                email_count_limit: int = 0) -> int:
         """
         增量获取并导出邮件（支持按条写入和停止保存）
         
@@ -423,8 +506,16 @@ class MailClient:
             email_ids = self.search_emails(start_date, end_date, folder)
             total_emails = len(email_ids)
             
-            if progress_callback:
-                progress_callback(0, total_emails, f"找到 {total_emails} 封邮件")
+            # 应用邮件数量限制
+            if email_count_limit > 0 and total_emails > email_count_limit:
+                # 取最新的邮件（邮件ID通常是按时间顺序的，最新的在后面）
+                email_ids = email_ids[-email_count_limit:]
+                total_emails = email_count_limit
+                if progress_callback:
+                    progress_callback(0, total_emails, f"找到邮件，限制为最近 {total_emails} 封")
+            else:
+                if progress_callback:
+                    progress_callback(0, total_emails, f"找到 {total_emails} 封邮件")
             
             if total_emails == 0:
                 if progress_callback:

@@ -87,8 +87,6 @@ class EmailExporter:
                     except Exception as e:
                         if progress_callback:
                             progress_callback(i, total_emails, f"导出邮件 {i} 失败: {str(e)[:50]}")
-                        else:
-                            print(f"导出邮件 {i} 失败: {str(e)[:50]}")
                         continue
             
             if progress_callback:
@@ -100,8 +98,6 @@ class EmailExporter:
             error_msg = f"CSV导出失败: {str(e)[:100]}"
             if progress_callback:
                 progress_callback(0, 0, error_msg)
-            else:
-                print(error_msg)
             return False
     
     def export_to_json(self, emails: List[Dict[str, Any]], output_file: str,
@@ -153,8 +149,6 @@ class EmailExporter:
                 except Exception as e:
                     if progress_callback:
                         progress_callback(i, total_emails, f"处理邮件 {i} 失败: {str(e)[:50]}")
-                    else:
-                        print(f"处理邮件 {i} 失败: {str(e)[:50]}")
                     continue
             
             # 写入JSON文件
@@ -170,8 +164,6 @@ class EmailExporter:
             error_msg = f"JSON导出失败: {str(e)[:100]}"
             if progress_callback:
                 progress_callback(0, 0, error_msg)
-            else:
-                print(error_msg)
             return False
     
     def export_emails(self, emails: List[Dict[str, Any]], output_file: str,
@@ -191,8 +183,6 @@ class EmailExporter:
             error_msg = "没有邮件数据可导出"
             if progress_callback:
                 progress_callback(0, 0, error_msg)
-            else:
-                print(error_msg)
             return False
         
         format_type = format_type.lower()
@@ -200,8 +190,6 @@ class EmailExporter:
             error_msg = f"不支持的导出格式: {format_type}。支持的格式: {', '.join(self.supported_formats)}"
             if progress_callback:
                 progress_callback(0, 0, error_msg)
-            else:
-                print(error_msg)
             return False
         
         # 根据格式类型调用相应的导出方法

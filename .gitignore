@@ -233,3 +233,15 @@ tmp/
 test_folder_encoding.py
 generate_imap_utf7.py
 debug_*.py
+
+# OAuth敏感文件
+gmail_token.json
+token.json
+oauth_token.json
+credentials.json
+user_email.txt
+
+# 临时和测试文件
+clean_oauth.py
+simple_oauth.py
+reauth_oauth.py

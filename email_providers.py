@@ -50,10 +50,10 @@ class EmailProviders:
             imap_server='imap.gmail.com',
             imap_port=993,
             use_ssl=True,
-            auth_type='app_password',
+            auth_type='oauth2',
             domain_patterns=['gmail.com', 'googlemail.com'],
             description='Google Gmail邮箱服务',
-            setup_instructions='需要开启两步验证并生成应用专用密码'
+            setup_instructions='使用OAuth2认证，需要配置Google API凭据'
         ),
         
         'qq': EmailProviderConfig(
@@ -110,8 +110,7 @@ class EmailProviders:
                 with open(config_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
         except (json.JSONDecodeError, IOError) as e:
-            print(f"警告：无法加载配置文件 {config_file}: {e}")
-            print("将使用默认配置")
+            pass
         
         return {}
     
@@ -140,7 +139,6 @@ class EmailProviders:
                         setup_instructions=provider_data['setup_instructions']
                     )
                 except KeyError as e:
-                    print(f"警告：提供商 {name} 配置不完整，缺少字段 {e}")
                     continue
         
         return providers
@@ -154,7 +152,6 @@ class EmailProviders:
             
             # 如果配置文件加载失败或为空，使用默认配置
             if not cls.PROVIDERS:
-                print("使用默认邮箱提供商配置")
                 cls.PROVIDERS = cls.DEFAULT_PROVIDERS.copy()
     
     @classmethod

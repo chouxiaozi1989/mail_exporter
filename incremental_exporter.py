@@ -58,7 +58,6 @@ class IncrementalEmailExporter:
                 return True
                 
         except Exception as e:
-            print(f"初始化导出失败: {str(e)}")
             return False
     
     def _initialize_csv(self):
@@ -107,7 +106,6 @@ class IncrementalEmailExporter:
                     return self._add_email_to_json(email_data, sequence_number)
                     
         except Exception as e:
-            print(f"添加邮件失败: {str(e)}")
             return False
             
         return False
@@ -150,7 +148,6 @@ class IncrementalEmailExporter:
             return True
             
         except Exception as e:
-            print(f"写入CSV失败: {str(e)}")
             return False
     
     def _add_email_to_json(self, email_data: Dict[str, Any], sequence_number: int) -> bool:
@@ -171,7 +168,6 @@ class IncrementalEmailExporter:
             return True
             
         except Exception as e:
-            print(f"添加到JSON失败: {str(e)}")
             return False
     
     def finalize_export(self) -> bool:
@@ -191,7 +187,6 @@ class IncrementalEmailExporter:
                     return self._finalize_json()
                     
         except Exception as e:
-            print(f"完成导出失败: {str(e)}")
             return False
         finally:
             self.is_initialized = False
@@ -209,7 +204,6 @@ class IncrementalEmailExporter:
             return True
             
         except Exception as e:
-            print(f"完成CSV导出失败: {str(e)}")
             return False
     
     def _finalize_json(self) -> bool:
@@ -223,7 +217,6 @@ class IncrementalEmailExporter:
             return True
             
         except Exception as e:
-            print(f"完成JSON导出失败: {str(e)}")
             return False
     
     def cleanup(self):

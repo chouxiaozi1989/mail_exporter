@@ -1,39 +1,22 @@
-# 163邮箱邮件导出工具依赖文件
-# 本项目主要使用Python标准库，无需安装额外的第三方包
-
-# Python版本要求
+# 邮件导出工具依赖文件
 # Python >= 3.6
 
-# 标准库模块（无需安装）:
-# - imaplib: IMAP邮件协议支持
-# - email: 邮件解析和处理
-# - csv: CSV文件读写
-# - tkinter: 图形界面（通常随Python安装）
-# - datetime: 日期时间处理
-# - threading: 多线程支持
-# - queue: 队列数据结构
-# - os: 操作系统接口
-# - re: 正则表达式
-# - locale: 本地化支持
-# - time: 时间相关功能
-# - argparse: 命令行参数解析
-# - getpass: 安全密码输入
-# - sys: 系统相关功能
+# 必需依赖
+# OAuth2认证支持（Gmail等）
+google-auth>=2.0.0
+google-auth-oauthlib>=0.5.0
+google-auth-httplib2>=0.1.0
+
+# 可选依赖
+# SOCKS代理支持
+PySocks>=1.7.1
+
+# 日期选择器组件（增强GUI体验）
+tkcalendar>=1.6.1
 
 # 注意事项:
-# 1. 如果系统中没有tkinter，可能需要单独安装:
+# 1. 本项目主要使用Python标准库
+# 2. tkinter通常随Python安装，如果缺失请安装:
 #    - Ubuntu/Debian: sudo apt-get install python3-tk
 #    - CentOS/RHEL: sudo yum install tkinter
-#    - Windows/macOS: 通常随Python安装包自带
-
-# 2. 可选依赖（用于增强用户体验）:
-# tkcalendar>=1.6.1  # 日期选择器组件，提供更好的日期输入体验
-
-# 安装可选依赖:
-# pip install tkcalendar
-
-# 3. 本项目的核心功能不依赖任何第三方PyPI包
-# 4. 建议使用Python 3.6或更高版本以获得最佳兼容性
-
-# 可选依赖包
-tkcalendar>=1.6.1
+# 3. 核心功能不依赖第三方包，OAuth功能需要google-auth系列包

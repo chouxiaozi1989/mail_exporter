@@ -12,6 +12,7 @@ import os
 from datetime import datetime
 from email_providers import EmailProviders
 from mail_client import MailClient
+from oauth_gmail import GmailOAuth
 
 def get_supported_providers():
     """获取支持的邮箱服务提供商列表
@@ -22,14 +23,14 @@ def get_supported_providers():
     providers = EmailProviders()
     return providers.get_all_providers()
 
-def get_mail_folders(username, password, provider=None):
+def get_mail_folders(username, password, provider=None, proxy_config=None, oauth_config=None):
     """获取邮箱文件夹列表"""
     try:
         # 使用MailClient获取文件夹列表
         if provider:
-            client = MailClient(provider_name=provider)
+            client = MailClient(provider_name=provider, proxy_config=proxy_config, oauth_config=oauth_config)
         else:
-            client = MailClient(email_address=username)
+            client = MailClient(email_address=username, proxy_config=proxy_config, oauth_config=oauth_config)
         client.connect(username, password)
         folders = client.get_folders()
         client.disconnect()
@@ -38,14 +39,14 @@ def get_mail_folders(username, password, provider=None):
         raise Exception(f"获取文件夹列表失败: {str(e)}")
 
 def fetch_emails(username, password, start_date, end_date, output_file, folder="INBOX", 
-                progress_callback=None, download_attachments=False, attachment_folder=None, provider=None):
+                progress_callback=None, download_attachments=False, attachment_folder=None, provider=None, proxy_config=None):
     """从邮箱获取邮件并导出"""
     try:
         # 使用MailClient进行邮件获取和导出
         if provider:
-            client = MailClient(provider_name=provider)
+            client = MailClient(provider_name=provider, proxy_config=proxy_config)
         else:
-            client = MailClient(email_address=username)
+            client = MailClient(email_address=username, proxy_config=proxy_config)
         client.connect(username, password)
         
         email_count = client.fetch_emails_batch(
@@ -66,14 +67,14 @@ def fetch_emails(username, password, start_date, end_date, output_file, folder="
 
 def fetch_emails_incremental(username, password, start_date, end_date, output_file, folder="INBOX", 
                             progress_callback=None, download_attachments=False, attachment_folder=None, 
-                            provider=None, stop_flag=None):
+                            provider=None, stop_flag=None, proxy_config=None, oauth_config=None, email_count_limit=0):
     """从邮箱增量获取邮件并导出（支持按条写入和停止保存）"""
     try:
         # 使用MailClient进行邮件获取和导出
         if provider:
-            client = MailClient(provider_name=provider)
+            client = MailClient(provider_name=provider, proxy_config=proxy_config, oauth_config=oauth_config)
         else:
-            client = MailClient(email_address=username)
+            client = MailClient(email_address=username, proxy_config=proxy_config, oauth_config=oauth_config)
         client.connect(username, password)
         
         email_count = client.fetch_emails_incremental(
@@ -84,7 +85,8 @@ def fetch_emails_incremental(username, password, start_date, end_date, output_fi
             download_attachments=download_attachments,
             attachment_folder=attachment_folder,
             progress_callback=progress_callback,
-            stop_flag=stop_flag
+            stop_flag=stop_flag,
+            email_count_limit=email_count_limit
         )
         
         client.disconnect()
@@ -92,6 +94,31 @@ def fetch_emails_incremental(username, password, start_date, end_date, output_fi
         
     except Exception as e:
         raise Exception(f"增量邮件导出失败: {str(e)}")
+
+def test_oauth_auth(oauth_config):
+    """
+    测试OAuth授权
+    
+    Args:
+        oauth_config: OAuth配置字典
+        
+    Returns:
+        bool: 授权是否成功
+    """
+    try:
+        gmail_oauth = GmailOAuth(
+            client_id=oauth_config.get('client_id'),
+            client_secret=oauth_config.get('client_secret'),
+            credentials_file=oauth_config.get('credentials_file'),
+            token_file=oauth_config.get('token_file', 'gmail_token.json')
+        )
+        
+        # 执行OAuth认证，强制重新认证以确保获取最新授权
+        return gmail_oauth.authenticate(force_reauth=True)
+        
+    except Exception as e:
+        print(f"OAuth授权测试失败: {str(e)}")
+        return False
 
 # 邮件处理函数已移至模块化文件中
 

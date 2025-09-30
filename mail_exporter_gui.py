@@ -14,14 +14,17 @@ except ImportError:
     HAS_DATE_PICKER = False
 
 # 程序版本信息
-VERSION = "1.2.0"
+VERSION = "1.5.0"
 
 class MailExporterGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("邮箱邮件导出工具")
-        self.root.geometry("700x650")
+        # 设置窗口为最大化显示
+        self.root.state('zoomed')
         self.root.resizable(True, True)
+        # 设置最小窗口尺寸
+        self.root.minsize(650, 600)
         
         # 创建消息队列用于线程间通信
         self.message_queue = queue.Queue()
@@ -32,6 +35,9 @@ class MailExporterGUI:
         
         self.setup_ui()
         self.check_queue()
+        
+        # 添加欢迎消息到日志框
+        self.log_message("邮件导出工具已启动，请配置参数后开始导出。")
     
     def setup_ui(self):
         """设置用户界面"""
@@ -43,9 +49,11 @@ class MailExporterGUI:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
+        # 确保结果区域（第5行）有足够的权重，防止被压缩
+        main_frame.rowconfigure(5, weight=1)
         
         # 标题和版本信息
-        title_label = ttk.Label(main_frame, text="163邮箱邮件导出工具", font=('Arial', 16, 'bold'))
+        title_label = ttk.Label(main_frame, text="邮箱邮件导出工具", font=('Arial', 16, 'bold'))
         title_label.grid(row=0, column=0, columnspan=2, pady=(0, 5))
         
         version_label = ttk.Label(main_frame, text=f"版本 {VERSION}", font=('Arial', 9), foreground='gray')
@@ -62,6 +70,9 @@ class MailExporterGUI:
         
         # 创建结果显示区域
         self.create_result_area(main_frame)
+        
+        # 初始化时检查OAuth状态（延迟执行，确保UI完全创建）
+        self.root.after(100, self._check_oauth_status)
     
     def create_input_fields(self, parent):
         """创建输入字段"""
@@ -92,6 +103,80 @@ class MailExporterGUI:
         self.provider_combobox.set(provider_values[0])  # 默认选择第一个
         row += 1
         
+        # 代理设置
+        ttk.Label(input_frame, text="代理设置:").grid(row=row, column=0, sticky=tk.W, pady=2)
+        proxy_frame = ttk.Frame(input_frame)
+        proxy_frame.grid(row=row, column=1, sticky=(tk.W, tk.E), padx=(10, 0), pady=2)
+        proxy_frame.columnconfigure(1, weight=1)
+        
+        # 代理启用选项
+        self.use_proxy_var = tk.BooleanVar(value=False)
+        proxy_checkbox = ttk.Checkbutton(proxy_frame, text="启用代理连接", 
+                                       variable=self.use_proxy_var,
+                                       command=self.toggle_proxy_config)
+        proxy_checkbox.grid(row=0, column=0, sticky=tk.W)
+        
+        # 代理类型选择
+        proxy_type_frame = ttk.Frame(proxy_frame)
+        proxy_type_frame.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(20, 0))
+        
+        ttk.Label(proxy_type_frame, text="类型:").grid(row=0, column=0, sticky=tk.W)
+        self.proxy_type_var = tk.StringVar(value="SOCKS5")
+        proxy_type_combo = ttk.Combobox(proxy_type_frame, textvariable=self.proxy_type_var,
+                                      values=["SOCKS5", "SOCKS4", "HTTP"], state="readonly", width=8)
+        proxy_type_combo.grid(row=0, column=1, sticky=tk.W, padx=(5, 0))
+        row += 1
+        
+        # 代理服务器配置框架
+        self.proxy_config_frame = ttk.Frame(input_frame)
+        self.proxy_config_frame.grid(row=row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
+        self.proxy_config_frame.columnconfigure(1, weight=1)
+        self.proxy_config_frame.columnconfigure(3, weight=1)
+        
+        # 代理服务器地址
+        ttk.Label(self.proxy_config_frame, text="代理服务器:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.proxy_host_var = tk.StringVar(value="127.0.0.1")
+        proxy_host_entry = ttk.Entry(self.proxy_config_frame, textvariable=self.proxy_host_var, width=20)
+        proxy_host_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(10, 5), pady=2)
+        
+        # 代理端口
+        ttk.Label(self.proxy_config_frame, text="端口:").grid(row=0, column=2, sticky=tk.W, pady=2, padx=(10, 0))
+        self.proxy_port_var = tk.StringVar(value="7890")
+        proxy_port_entry = ttk.Entry(self.proxy_config_frame, textvariable=self.proxy_port_var, width=8)
+        proxy_port_entry.grid(row=0, column=3, sticky=tk.W, padx=(5, 0), pady=2)
+        
+        # 代理认证
+        auth_frame = ttk.Frame(self.proxy_config_frame)
+        auth_frame.grid(row=1, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=(5, 0))
+        auth_frame.columnconfigure(1, weight=1)
+        auth_frame.columnconfigure(3, weight=1)
+        
+        self.proxy_auth_var = tk.BooleanVar(value=False)
+        auth_checkbox = ttk.Checkbutton(auth_frame, text="需要认证", 
+                                      variable=self.proxy_auth_var,
+                                      command=self.toggle_proxy_auth)
+        auth_checkbox.grid(row=0, column=0, sticky=tk.W)
+        
+        # 代理用户名
+        self.proxy_username_label = ttk.Label(auth_frame, text="用户名:")
+        self.proxy_username_label.grid(row=0, column=1, sticky=tk.W, padx=(20, 0))
+        self.proxy_username_var = tk.StringVar()
+        self.proxy_username_entry = ttk.Entry(auth_frame, textvariable=self.proxy_username_var, width=15)
+        self.proxy_username_entry.grid(row=0, column=2, sticky=(tk.W, tk.E), padx=(5, 10))
+        
+        # 代理密码
+        self.proxy_password_label = ttk.Label(auth_frame, text="密码:")
+        self.proxy_password_label.grid(row=0, column=3, sticky=tk.W)
+        self.proxy_password_var = tk.StringVar()
+        self.proxy_password_entry = ttk.Entry(auth_frame, textvariable=self.proxy_password_var, show="*", width=15)
+        self.proxy_password_entry.grid(row=0, column=4, sticky=(tk.W, tk.E), padx=(5, 0))
+        
+        # 初始状态设置
+        self.toggle_proxy_config()
+        self.toggle_proxy_auth()
+        
+        row += 1
+        
         # 用户名
         ttk.Label(input_frame, text="邮箱用户名:").grid(row=row, column=0, sticky=tk.W, pady=2)
         self.username_var = tk.StringVar()
@@ -102,8 +187,71 @@ class MailExporterGUI:
         # 密码
         ttk.Label(input_frame, text="密码/授权码:").grid(row=row, column=0, sticky=tk.W, pady=2)
         self.password_var = tk.StringVar()
-        password_entry = ttk.Entry(input_frame, textvariable=self.password_var, show="*", width=30)
-        password_entry.grid(row=row, column=1, sticky=(tk.W, tk.E), padx=(10, 0), pady=2)
+        self.password_entry = ttk.Entry(input_frame, textvariable=self.password_var, show="*", width=30)
+        self.password_entry.grid(row=row, column=1, sticky=(tk.W, tk.E), padx=(10, 0), pady=2)
+        row += 1
+        
+        # OAuth配置（仅Gmail显示）
+        self.oauth_frame = ttk.Frame(input_frame)
+        self.oauth_frame.grid(row=row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
+        self.oauth_frame.columnconfigure(1, weight=1)
+        
+        # OAuth启用选项
+        self.use_oauth_var = tk.BooleanVar(value=False)
+        oauth_checkbox = ttk.Checkbutton(self.oauth_frame, text="使用OAuth2认证（推荐）", 
+                                       variable=self.use_oauth_var,
+                                       command=self.toggle_oauth_config)
+        oauth_checkbox.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=2)
+        
+        # OAuth配置字段
+        self.oauth_config_frame = ttk.LabelFrame(self.oauth_frame, text="OAuth2配置", padding="5")
+        self.oauth_config_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
+        self.oauth_config_frame.columnconfigure(1, weight=1)
+        
+        # Client ID
+        self.client_id_label = ttk.Label(self.oauth_config_frame, text="Client ID:")
+        self.client_id_label.grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.client_id_var = tk.StringVar()
+        self.client_id_entry = ttk.Entry(self.oauth_config_frame, textvariable=self.client_id_var, width=50)
+        self.client_id_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(10, 0), pady=2)
+        
+        # Client Secret
+        self.client_secret_label = ttk.Label(self.oauth_config_frame, text="Client Secret:")
+        self.client_secret_label.grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.client_secret_var = tk.StringVar()
+        self.client_secret_entry = ttk.Entry(self.oauth_config_frame, textvariable=self.client_secret_var, show="*", width=50)
+        self.client_secret_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(10, 0), pady=2)
+        
+        # OAuth授权按钮和状态
+        oauth_auth_frame = ttk.Frame(self.oauth_config_frame)
+        oauth_auth_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 5))
+        oauth_auth_frame.columnconfigure(1, weight=1)
+        
+        self.oauth_auth_button = ttk.Button(oauth_auth_frame, text="开始OAuth授权", command=self.start_oauth_auth)
+        self.oauth_auth_button.grid(row=0, column=0, sticky=tk.W)
+        
+        self.oauth_status_var = tk.StringVar(value="未授权")
+        self.oauth_status_label = ttk.Label(oauth_auth_frame, textvariable=self.oauth_status_var, foreground="red")
+        self.oauth_status_label.grid(row=0, column=1, sticky=tk.W, padx=(10, 0))
+        
+        # OAuth状态说明
+        self.oauth_status_note_var = tk.StringVar(value="需要填入Client ID和Secret进行授权")
+        self.oauth_status_note = ttk.Label(self.oauth_config_frame, textvariable=self.oauth_status_note_var, 
+                                         font=('Arial', 8), foreground='gray')
+        self.oauth_status_note.grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
+        
+        # 说明文本
+        oauth_note = ttk.Label(self.oauth_config_frame, 
+                             text="请在Google Cloud Console创建OAuth2凭据并填入上述信息，然后点击授权按钮", 
+                             font=('Arial', 8), foreground='blue')
+        oauth_note.grid(row=4, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
+        
+        # 绑定提供商变化事件
+        self.provider_combobox.bind('<<ComboboxSelected>>', self.on_provider_changed)
+        
+        # 初始状态设置
+        self.toggle_oauth_config()
+        
         row += 1
         
         # 开始日期
@@ -159,6 +307,23 @@ class MailExporterGUI:
         refresh_folder_btn = ttk.Button(folder_frame, text="刷新", command=self.refresh_folders)
         refresh_folder_btn.grid(row=0, column=1, padx=(5, 0))
         row += 1
+        
+        # 邮件数量限制
+        ttk.Label(input_frame, text="邮件数量:").grid(row=row, column=0, sticky=tk.W, pady=2)
+        count_frame = ttk.Frame(input_frame)
+        count_frame.grid(row=row, column=1, sticky=(tk.W, tk.E), padx=(10, 0), pady=2)
+        
+        self.email_count_var = tk.StringVar(value="100")
+        count_entry = ttk.Entry(count_frame, textvariable=self.email_count_var, width=10)
+        count_entry.grid(row=0, column=0)
+        
+        ttk.Label(count_frame, text="封 (0表示不限制)").grid(row=0, column=1, padx=(5, 0))
+        
+        # 添加说明文本
+        count_note = ttk.Label(input_frame, text="(获取最近的N封邮件，按时间倒序)", 
+                              font=('Arial', 8), foreground='gray')
+        count_note.grid(row=row+1, column=1, sticky=tk.W, padx=(10, 0), pady=(0, 5))
+        row += 2
         
         # 输出文件
         ttk.Label(input_frame, text="输出文件:").grid(row=row, column=0, sticky=tk.W, pady=2)
@@ -251,9 +416,6 @@ class MailExporterGUI:
         scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=self.result_text.yview)
         scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
         self.result_text.configure(yscrollcommand=scrollbar.set)
-        
-        # 配置主框架的行权重
-        parent.rowconfigure(5, weight=1)
     
     def refresh_folders(self):
         """刷新邮箱文件夹列表"""
@@ -261,12 +423,20 @@ class MailExporterGUI:
         password = self.password_var.get().strip()
         provider_text = self.provider_var.get().strip()
         
-        if not username or not password:
-            messagebox.showwarning("提示", "请先输入邮箱用户名和密码")
+        if not username:
+            messagebox.showwarning("提示", "请先输入邮箱用户名")
             return
         
         if not provider_text:
             messagebox.showwarning("提示", "请选择邮箱服务商")
+            return
+        
+        # 检查认证方式
+        provider = provider_text.split(' (')[0] if ' (' in provider_text else provider_text
+        use_oauth = self.use_oauth_var.get() and 'gmail' in provider.lower()
+        
+        if not use_oauth and not password:
+            messagebox.showwarning("提示", "请先输入密码或授权码")
             return
         
         # 从显示文本中提取provider名称
@@ -279,7 +449,29 @@ class MailExporterGUI:
         
         def get_folders_worker():
             try:
-                folders = get_mail_folders(username, password, provider)
+                # 获取代理设置
+                proxy_config = None
+                if self.use_proxy_var.get():
+                    proxy_config = {
+                        'enabled': True,
+                        'type': self.proxy_type_var.get(),
+                        'host': self.proxy_host_var.get(),
+                        'port': int(self.proxy_port_var.get()) if self.proxy_port_var.get() else None,
+                        'username': self.proxy_username_var.get() if self.proxy_username_var.get() else None,
+                        'password': self.proxy_password_var.get() if self.proxy_password_var.get() else None
+                    }
+                
+                # 获取OAuth配置
+                oauth_config = None
+                if self.use_oauth_var.get() and 'gmail' in provider.lower():
+                    oauth_config = {
+                        'client_id': self.client_id_var.get().strip(),
+                        'client_secret': self.client_secret_var.get().strip(),
+                        'credentials_file': None,
+                        'token_file': 'gmail_token.json'
+                    }
+                
+                folders = get_mail_folders(username, password, provider, proxy_config, oauth_config)
                 
                 # 更新下拉列表
                 folder_values = []
@@ -347,6 +539,286 @@ class MailExporterGUI:
         if folder:
             self.attachment_folder_var.set(folder)
     
+    def toggle_proxy_config(self):
+        """切换代理配置界面显示状态"""
+        if self.use_proxy_var.get():
+            # 显示代理配置框架
+            self.proxy_config_frame.grid()
+            # 显示代理配置内容
+            for widget in self.proxy_config_frame.winfo_children():
+                widget.grid()
+            # 递归显示子框架中的控件
+            for child in self.proxy_config_frame.winfo_children():
+                if isinstance(child, ttk.Frame):
+                    for subwidget in child.winfo_children():
+                        subwidget.grid()
+        else:
+            # 完全隐藏代理配置框架
+            self.proxy_config_frame.grid_remove()
+        
+        # 强制更新布局并调整窗口大小
+        self.root.update_idletasks()
+        
+        # 获取当前窗口的最小尺寸
+        self.root.update()
+        min_width = self.root.winfo_reqwidth()
+        min_height = self.root.winfo_reqheight()
+        
+        # 如果隐藏代理配置，调整窗口大小
+        if not self.use_proxy_var.get():
+            current_width = self.root.winfo_width()
+            # 保持当前宽度，但调整高度以适应内容
+            self.root.geometry(f"{max(current_width, min_width)}x{min_height}")
+        
+        # 设置最小窗口大小
+        self.root.minsize(650, 600)
+    
+    def toggle_proxy_auth(self):
+        """切换代理认证配置显示"""
+        if self.proxy_auth_var.get():
+            # 显示认证字段
+            self.proxy_username_label.grid()
+            self.proxy_username_entry.grid()
+            self.proxy_password_label.grid()
+            self.proxy_password_entry.grid()
+        else:
+            # 隐藏认证字段
+            self.proxy_username_label.grid_remove()
+            self.proxy_username_entry.grid_remove()
+            self.proxy_password_label.grid_remove()
+            self.proxy_password_entry.grid_remove()
+    
+    def toggle_oauth_config(self):
+        """切换OAuth配置显示"""
+        if self.use_oauth_var.get():
+            # 显示OAuth配置
+            self.oauth_config_frame.grid()
+            # 禁用密码输入
+            self.password_entry.config(state='disabled')
+        else:
+            # 隐藏OAuth配置
+            self.oauth_config_frame.grid_remove()
+            # 启用密码输入
+            self.password_entry.config(state='normal')
+    
+    def check_oauth_status(self):
+        """检查OAuth授权状态"""
+        self._check_oauth_status()
+    
+    def refresh_oauth_status(self):
+        """强制刷新OAuth授权状态"""
+        self.log_message("正在刷新OAuth状态...")
+        self._check_oauth_status()
+        self.log_message("OAuth状态刷新完成")
+    
+    def _hide_oauth_credentials(self):
+        """隐藏OAuth凭据字段"""
+        try:
+            self.client_id_label.grid_remove()
+            self.client_id_entry.grid_remove()
+            self.client_secret_label.grid_remove()
+            self.client_secret_entry.grid_remove()
+        except AttributeError:
+            # 如果控件还未创建，忽略错误
+            pass
+    
+    def _show_oauth_credentials(self):
+        """显示OAuth凭据字段"""
+        try:
+            self.client_id_label.grid()
+            self.client_id_entry.grid()
+            self.client_secret_label.grid()
+            self.client_secret_entry.grid()
+        except AttributeError:
+            # 如果控件还未创建，忽略错误
+            pass
+    
+    def _check_oauth_status(self):
+        """检查OAuth授权状态"""
+        try:
+            if os.path.exists('gmail_token.json'):
+                from oauth_gmail import GmailOAuth
+                
+                # 尝试使用当前的Client ID和Secret创建OAuth实例
+                client_id = self.client_id_var.get().strip() if hasattr(self, 'client_id_var') else ""
+                client_secret = self.client_secret_var.get().strip() if hasattr(self, 'client_secret_var') else ""
+                
+                # 如果有凭据，使用它们创建OAuth实例
+                if client_id and client_secret:
+                    gmail_oauth = GmailOAuth(
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        token_file='gmail_token.json'
+                    )
+                else:
+                    # 如果没有凭据，尝试从令牌文件中读取
+                    gmail_oauth = GmailOAuth(token_file='gmail_token.json')
+                
+                # 检查令牌是否有效
+                if gmail_oauth._load_existing_token() and gmail_oauth.credentials:
+                    # 检查令牌是否过期
+                    if gmail_oauth.credentials.valid:
+                        # OAuth已授权且令牌有效
+                        self.oauth_status_var.set("已授权")
+                        self.oauth_status_label.config(foreground="green")
+                        self.oauth_auth_button.config(text="重新授权")
+                        self.oauth_status_note_var.set("OAuth2已授权，可直接导出邮件。如需重新授权请点击重新授权按钮")
+                        self._hide_oauth_credentials()
+                        self.log_message("OAuth状态检查: 已授权")
+                        return True
+                    elif gmail_oauth.credentials.expired and gmail_oauth.credentials.refresh_token:
+                        # 令牌过期但有刷新令牌，尝试刷新
+                        try:
+                            if gmail_oauth._refresh_token():
+                                self.oauth_status_var.set("已授权")
+                                self.oauth_status_label.config(foreground="green")
+                                self.oauth_auth_button.config(text="重新授权")
+                                self.oauth_status_note_var.set("OAuth2已授权，可直接导出邮件。如需重新授权请点击重新授权按钮")
+                                self._hide_oauth_credentials()
+                                self.log_message("OAuth状态检查: 令牌已刷新，已授权")
+                                return True
+                            else:
+                                self.log_message("OAuth状态检查: 令牌刷新失败")
+                        except Exception as refresh_error:
+                            self.log_message(f"OAuth状态检查: 令牌刷新出错 - {refresh_error}")
+                    else:
+                        # 令牌过期且无刷新令牌
+                        self.log_message("OAuth状态检查: 令牌已过期且无刷新令牌")
+                else:
+                    # 令牌文件存在但无效
+                    self.log_message("OAuth状态检查: 令牌无效")
+        except Exception as e:
+            self.log_message(f"OAuth状态检查出错: {e}")
+        
+        # OAuth未授权或检查失败
+        self.oauth_status_var.set("未授权")
+        self.oauth_status_label.config(foreground="red")
+        self.oauth_auth_button.config(text="开始OAuth授权")
+        self.oauth_status_note_var.set("需要填入Client ID和Secret进行授权")
+        self._show_oauth_credentials()
+        self.log_message("OAuth状态检查: 未授权")
+        return False
+    
+    def start_oauth_auth(self):
+        """开始OAuth授权流程"""
+        # 如果是重新授权，先显示凭据字段
+        if self.oauth_auth_button.cget("text") == "重新授权":
+            self._show_oauth_credentials()
+            self.oauth_status_var.set("请填入凭据后重新授权")
+            self.oauth_status_label.config(foreground="orange")
+            self.oauth_status_note_var.set("请填入Client ID和Secret，然后点击开始OAuth授权")
+            self.oauth_auth_button.config(text="开始OAuth授权")
+            return
+        
+        client_id = self.client_id_var.get().strip()
+        client_secret = self.client_secret_var.get().strip()
+        
+        if not client_id or not client_secret:
+            messagebox.showerror("错误", "请先填入Client ID和Client Secret")
+            return
+        
+        self.oauth_auth_button.config(state="disabled")
+        self.oauth_status_var.set("授权中...")
+        self.oauth_status_label.config(foreground="orange")
+        
+        def oauth_worker():
+             try:
+                 from oauth_gmail import GmailOAuth
+                 
+                 def status_callback(message):
+                     """状态回调函数，在主线程中更新状态"""
+                     # 避免在认证完成后覆盖最终状态
+                     if not message.startswith("OAuth授权完成"):
+                         self.root.after(0, lambda msg=message: self.update_oauth_status(msg))
+                 
+                 gmail_oauth = GmailOAuth(
+                     client_id=client_id,
+                     client_secret=client_secret,
+                     credentials_file=None,
+                     token_file='gmail_token.json',
+                     status_callback=status_callback
+                 )
+                 
+                 # 执行OAuth认证，强制重新认证以确保获取最新授权
+                 success = gmail_oauth.authenticate(force_reauth=True)
+                 
+                 if success:
+                     # 确保成功状态在最后设置
+                     self.root.after(0, lambda: self.oauth_auth_success())
+                 else:
+                     self.root.after(0, lambda: self.oauth_auth_failed("授权失败"))
+                     
+             except Exception as e:
+                 error_msg = str(e)
+                 self.root.after(0, lambda msg=error_msg: self.oauth_auth_failed(msg))
+        
+        threading.Thread(target=oauth_worker, daemon=True).start()
+    
+    def update_oauth_status(self, message):
+        """更新OAuth状态显示"""
+        self.oauth_status_var.set(message)
+        self.log_message(f"OAuth状态: {message}")
+    
+    def oauth_auth_success(self):
+        """OAuth授权成功"""
+        # 明确设置成功状态
+        self.oauth_status_var.set("已授权")
+        self.oauth_status_label.config(foreground="green")
+        self.oauth_auth_button.config(state="normal", text="重新授权")
+        self.oauth_status_note_var.set("OAuth2已授权，可直接导出邮件。如需重新授权请点击重新授权按钮")
+        
+        # 隐藏OAuth凭据字段
+        self._hide_oauth_credentials()
+        
+        self.log_message("OAuth授权成功")
+        
+        # 延迟检查OAuth状态以确保令牌文件已保存
+        self.root.after(1000, self._check_oauth_status)
+    
+    def oauth_auth_failed(self, error_msg):
+        """OAuth授权失败"""
+        self.oauth_status_var.set("授权失败")
+        self.oauth_status_label.config(foreground="red")
+        self.oauth_auth_button.config(state="normal")
+        
+        # 根据错误类型提供不同的提示信息
+        if "授权码无效" in error_msg or "invalid_grant" in error_msg:
+            note_msg = "授权码已过期或无效，请重新进行OAuth授权"
+            dialog_msg = "授权码已过期或无效。\n\n这通常发生在：\n1. 授权过程中等待时间过长\n2. 重复使用了已失效的授权码\n\n请点击'开始OAuth授权'重新进行授权。"
+        elif "权限范围已更改" in error_msg or "范围冲突" in error_msg or "Scope has changed" in error_msg:
+            note_msg = "OAuth权限范围已更改，请重新授权"
+            dialog_msg = "OAuth权限范围已更改。\n\n应用的权限要求发生了变化，旧的授权令牌已失效。\n\n解决方案：\n1. 点击'开始OAuth授权'重新进行授权\n2. 在浏览器中重新确认权限\n3. 完成授权后即可正常使用"
+        elif "Client ID" in error_msg or "client_secret" in error_msg:
+            note_msg = "Client ID或Secret无效，请检查配置"
+            dialog_msg = "Client ID或Client Secret无效。\n\n请检查：\n1. Client ID和Secret是否正确\n2. 是否已在Google Cloud Console中启用Gmail API\n3. 重定向URI是否正确配置"
+        elif "超时" in error_msg or "timeout" in error_msg.lower():
+            note_msg = "授权超时，请重新尝试"
+            dialog_msg = "OAuth授权超时。\n\n请确保：\n1. 网络连接正常\n2. 在5分钟内完成浏览器授权\n3. 没有被防火墙阻止"
+        else:
+            note_msg = "授权失败，请检查网络连接和配置"
+            dialog_msg = f"OAuth授权失败：\n\n{error_msg}\n\n请检查网络连接和OAuth配置是否正确。"
+        
+        self.oauth_status_note_var.set(note_msg)
+        # OAuth授权失败后显示凭据字段
+        self._show_oauth_credentials()
+        messagebox.showerror("OAuth授权失败", dialog_msg)
+        self.log_message(f"OAuth授权失败: {error_msg}")
+        
+        # 刷新OAuth状态以确保界面状态正确
+        self.root.after(500, self._check_oauth_status)
+    
+    def on_provider_changed(self, event=None):
+        """当邮箱提供商改变时的处理"""
+        provider_text = self.provider_var.get()
+        if 'gmail' in provider_text.lower():
+            # 显示OAuth选项
+            self.oauth_frame.grid()
+        else:
+            # 隐藏OAuth选项
+            self.oauth_frame.grid_remove()
+            self.use_oauth_var.set(False)
+            self.toggle_oauth_config()
+    
     def start_export(self):
         """开始导出"""
         # 验证输入
@@ -382,9 +854,36 @@ class MailExporterGUI:
             messagebox.showerror("错误", "请输入邮箱用户名")
             return False
         
-        if not self.password_var.get().strip():
-            messagebox.showerror("错误", "请输入密码或授权码")
-            return False
+        # 检查认证方式
+        provider_text = self.provider_var.get().strip()
+        provider = provider_text.split(' (')[0] if ' (' in provider_text else provider_text
+        use_oauth = self.use_oauth_var.get() and 'gmail' in provider.lower()
+        
+        if use_oauth:
+            # OAuth认证验证 - 先检查是否已有有效令牌
+            oauth_authorized = False
+            try:
+                if os.path.exists('gmail_token.json'):
+                    from oauth_gmail import GmailOAuth
+                    gmail_oauth = GmailOAuth(token_file='gmail_token.json')
+                    if gmail_oauth._load_existing_token() and gmail_oauth.credentials and gmail_oauth.credentials.valid:
+                        oauth_authorized = True
+            except:
+                pass
+            
+            # 如果OAuth未授权，则需要检查Client ID和Secret
+            if not oauth_authorized:
+                if not self.client_id_var.get().strip():
+                    messagebox.showerror("错误", "请输入OAuth Client ID或先完成OAuth授权")
+                    return False
+                if not self.client_secret_var.get().strip():
+                    messagebox.showerror("错误", "请输入OAuth Client Secret或先完成OAuth授权")
+                    return False
+        else:
+            # 传统密码认证验证
+            if not self.password_var.get().strip():
+                messagebox.showerror("错误", "请输入密码或授权码")
+                return False
         
         try:
             if HAS_DATE_PICKER:
@@ -402,6 +901,18 @@ class MailExporterGUI:
         if not self.output_var.get().strip():
             messagebox.showerror("错误", "请指定输出文件")
             return False
+        
+        # 验证邮件数量
+        email_count_str = self.email_count_var.get().strip()
+        if email_count_str:
+            try:
+                email_count = int(email_count_str)
+                if email_count < 0:
+                    messagebox.showerror("错误", "邮件数量不能为负数")
+                    return False
+            except ValueError:
+                messagebox.showerror("错误", "邮件数量必须是数字")
+                return False
         
         return True
     
@@ -459,6 +970,15 @@ class MailExporterGUI:
             download_attachments = self.download_attachments_var.get()
             attachment_folder = self.attachment_folder_var.get().strip() if download_attachments else None
             
+            # 获取邮件数量限制
+            email_count_str = self.email_count_var.get().strip()
+            email_count_limit = 0  # 默认不限制
+            if email_count_str:
+                try:
+                    email_count_limit = int(email_count_str)
+                except ValueError:
+                    email_count_limit = 0
+            
             # 发送开始消息
             self.message_queue.put(("log", f"开始导出邮件..."))
             self.message_queue.put(("log", f"邮箱服务商: {provider}"))
@@ -466,6 +986,10 @@ class MailExporterGUI:
             self.message_queue.put(("log", f"时间范围: {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}"))
             self.message_queue.put(("log", f"输出文件: {output_file}"))
             self.message_queue.put(("log", f"邮箱文件夹: {folder}"))
+            if email_count_limit > 0:
+                self.message_queue.put(("log", f"邮件数量限制: 最近 {email_count_limit} 封"))
+            else:
+                self.message_queue.put(("log", "邮件数量限制: 无限制"))
             
             if download_attachments:
                 if attachment_folder:
@@ -475,10 +999,41 @@ class MailExporterGUI:
             else:
                 self.message_queue.put(("log", "不下载附件"))
             
-            # 调用增量导出函数，传入进度回调、附件参数和停止标志
+            # 获取代理设置
+            use_proxy = self.use_proxy_var.get()
+            proxy_config = None
+            
+            if use_proxy:
+                proxy_config = {
+                    'type': self.proxy_type_var.get().lower(),
+                    'host': self.proxy_host_var.get().strip(),
+                    'port': int(self.proxy_port_var.get().strip()) if self.proxy_port_var.get().strip().isdigit() else 1080,
+                    'username': self.proxy_username_var.get().strip() if self.proxy_auth_var.get() else None,
+                    'password': self.proxy_password_var.get().strip() if self.proxy_auth_var.get() else None
+                }
+                self.message_queue.put(("log", f"代理设置: {proxy_config['type'].upper()} {proxy_config['host']}:{proxy_config['port']}"))
+                if proxy_config['username']:
+                    self.message_queue.put(("log", f"代理认证: 用户名 {proxy_config['username']}"))
+            
+            # 获取OAuth配置
+            oauth_config = None
+            use_oauth = self.use_oauth_var.get() and 'gmail' in provider.lower()
+            
+            if use_oauth:
+                oauth_config = {
+                    'client_id': self.client_id_var.get().strip(),
+                    'client_secret': self.client_secret_var.get().strip(),
+                    'credentials_file': None,  # 使用内置凭据
+                    'token_file': 'gmail_token.json'
+                }
+                self.message_queue.put(("log", "使用OAuth2认证"))
+                # OAuth模式下密码参数可以为空
+                password = None
+            
+            # 调用增量导出函数，传入进度回调、附件参数、停止标志、代理设置、OAuth配置和邮件数量限制
             email_count = fetch_emails_incremental(username, password, start_date, end_date, output_file, folder, 
                                                   self.progress_callback, download_attachments, attachment_folder, 
-                                                  provider, lambda: self.stop_requested)
+                                                  provider, lambda: self.stop_requested, proxy_config, oauth_config, email_count_limit)
             
             if self.is_exporting:
                 if self.stop_requested:
@@ -543,8 +1098,13 @@ class MailExporterGUI:
     def log_message(self, message):
         """记录消息到日志区域"""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        self.result_text.insert(tk.END, f"[{timestamp}] {message}\n")
-        self.result_text.see(tk.END)
+        # 检查result_text是否存在，避免在UI初始化期间出错
+        if hasattr(self, 'result_text') and self.result_text:
+            self.result_text.insert(tk.END, f"[{timestamp}] {message}\n")
+            self.result_text.see(tk.END)
+        else:
+            # 如果UI还未完全初始化，只打印到控制台
+            print(f"[{timestamp}] {message}")
 
 def main():
     root = tk.Tk()

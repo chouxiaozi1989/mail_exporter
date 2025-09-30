@@ -88,7 +88,6 @@ class EmailParser:
                     i += 1
             return ''.join(result)
         except Exception as e:
-            print(f"手动解码IMAP UTF-7失败: {e}")
             return text
     
     def decode_subject(self, subject: str) -> str:
@@ -119,7 +118,6 @@ class EmailParser:
                         subject_str += part
                 return subject_str
             except Exception as e:
-                print(f"解码主题失败: {subject} - {e}")
                 return subject
         else:
             return "[无主题]"
@@ -169,10 +167,8 @@ class EmailParser:
                         if email_in_text:
                             return email_in_text.group(0)
                         else:
-                            print(f"无法从 '{from_str}' 中提取邮箱地址")
                             return from_str
             except Exception as e:
-                print(f"解析发件人失败: {from_} - {e}")
                 return from_
         else:
             return "[未知发件人]"
@@ -211,7 +207,7 @@ class EmailParser:
                                     text = payload.decode('utf-8', errors='ignore')
                                 content += text + "\n"
                         except Exception as e:
-                            print(f"解析文本内容失败: {e}")
+                            pass
                     
                     elif content_type == "text/html":
                         try:
@@ -230,7 +226,7 @@ class EmailParser:
                                 if clean_text and not content.strip():
                                     content = clean_text + "\n"
                         except Exception as e:
-                            print(f"解析HTML内容失败: {e}")
+                            pass
             else:
                 # 单部分邮件
                 try:
@@ -242,10 +238,10 @@ class EmailParser:
                         except (LookupError, UnicodeDecodeError):
                             content = payload.decode('utf-8', errors='ignore')
                 except Exception as e:
-                    print(f"解析单部分邮件内容失败: {e}")
+                    pass
         
         except Exception as e:
-            print(f"解析邮件内容时发生错误: {e}")
+            pass
         
         return content.strip() if content else "[无内容]"
     
@@ -334,8 +330,6 @@ class EmailParser:
                 except Exception as e:
                     if progress_callback:
                         progress_callback(0, 0, f"保存附件失败: {filename} - {str(e)[:50]}")
-                    else:
-                        print(f"保存附件失败: {filename} - {str(e)[:50]}")
         
         return attachment_count, attachment_files
     
@@ -359,7 +353,7 @@ class EmailParser:
                 timestamp = email.utils.mktime_tz(parsed_date)
                 return datetime.fromtimestamp(timestamp)
         except Exception as e:
-            print(f"解析邮件日期失败: {date_str} - {e}")
+            return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             
         return None
     
