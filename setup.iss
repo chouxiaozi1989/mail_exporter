@@ -2,7 +2,7 @@
 ; 用于将邮件导出工具打包成Windows安装程序
 
 #define MyAppName "邮件导出工具"
-#define MyAppVersion "1.3.0"
+#define MyAppVersion "1.5.0"
 #define MyAppPublisher "chouxiaozi1989"
 #define MyAppURL "https://github.com/chouxiaozi1989/mail_exporter"
 #define MyAppExeName "mail_exporter_gui.exe"
