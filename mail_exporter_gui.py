@@ -93,16 +93,50 @@ class MailExporterGUI:
         # 获取支持的邮箱服务提供商
         try:
             providers = get_supported_providers()
-            provider_values = [f"{name} ({display})" for name, display in providers]
+            provider_values = [f"{name} ({display})" for name, display in providers.items()]
         except:
-            provider_values = ["163 (网易邮箱)", "gmail (Gmail)", "qq (QQ邮箱)", "outlook (Outlook)", "yahoo (Yahoo)"]
+            provider_values = ["163 (网易邮箱)", "gmail (Gmail)", "qq (QQ邮箱)", "outlook (Outlook)", "yahoo (Yahoo)", "custom (其他邮箱(自定义))"]
         
-        self.provider_combobox = ttk.Combobox(provider_frame, textvariable=self.provider_var, 
+        self.provider_combobox = ttk.Combobox(provider_frame, textvariable=self.provider_var,
                                             values=provider_values, state="readonly", width=25)
         self.provider_combobox.grid(row=0, column=0, sticky=(tk.W, tk.E))
         self.provider_combobox.set(provider_values[0])  # 默认选择第一个
         row += 1
-        
+
+        # 自定义邮箱配置框架（仅在选择其他邮箱时显示）
+        self.custom_provider_frame = ttk.LabelFrame(input_frame, text="自定义邮箱服务器配置", padding="5")
+        self.custom_provider_frame.grid(row=row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
+        self.custom_provider_frame.columnconfigure(1, weight=1)
+
+        # IMAP服务器地址
+        ttk.Label(self.custom_provider_frame, text="IMAP服务器:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.custom_imap_server_var = tk.StringVar()
+        custom_server_entry = ttk.Entry(self.custom_provider_frame, textvariable=self.custom_imap_server_var, width=40)
+        custom_server_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(10, 0), pady=2)
+
+        # IMAP端口
+        ttk.Label(self.custom_provider_frame, text="IMAP端口:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.custom_imap_port_var = tk.StringVar(value="993")
+        custom_port_entry = ttk.Entry(self.custom_provider_frame, textvariable=self.custom_imap_port_var, width=10)
+        custom_port_entry.grid(row=1, column=1, sticky=tk.W, padx=(10, 0), pady=2)
+
+        # 是否使用SSL
+        self.custom_use_ssl_var = tk.BooleanVar(value=True)
+        custom_ssl_checkbox = ttk.Checkbutton(self.custom_provider_frame, text="使用SSL/TLS加密连接",
+                                             variable=self.custom_use_ssl_var)
+        custom_ssl_checkbox.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=2)
+
+        # 说明文本
+        custom_note = ttk.Label(self.custom_provider_frame,
+                               text="例如: imap.qq.com (端口993), imap.sina.com (端口993)等",
+                               font=('Arial', 8), foreground='gray')
+        custom_note.grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
+
+        # 初始隐藏自定义配置框
+        self.custom_provider_frame.grid_remove()
+
+        row += 1
+
         # 代理设置
         ttk.Label(input_frame, text="代理设置:").grid(row=row, column=0, sticky=tk.W, pady=2)
         proxy_frame = ttk.Frame(input_frame)
@@ -810,14 +844,25 @@ class MailExporterGUI:
     def on_provider_changed(self, event=None):
         """当邮箱提供商改变时的处理"""
         provider_text = self.provider_var.get()
-        if 'gmail' in provider_text.lower():
+        provider = provider_text.split(' (')[0].strip().lower() if ' (' in provider_text else provider_text.lower()
+
+        # 处理Gmail OAuth选项显示
+        if 'gmail' in provider:
             # 显示OAuth选项
             self.oauth_frame.grid()
-        else:
-            # 隐藏OAuth选项
+            self.custom_provider_frame.grid_remove()
+        elif provider == 'custom':
+            # 隐藏OAuth选项，显示自定义配置
             self.oauth_frame.grid_remove()
             self.use_oauth_var.set(False)
             self.toggle_oauth_config()
+            self.custom_provider_frame.grid()
+        else:
+            # 隐藏OAuth选项和自定义配置
+            self.oauth_frame.grid_remove()
+            self.use_oauth_var.set(False)
+            self.toggle_oauth_config()
+            self.custom_provider_frame.grid_remove()
     
     def start_export(self):
         """开始导出"""
@@ -853,12 +898,36 @@ class MailExporterGUI:
         if not self.username_var.get().strip():
             messagebox.showerror("错误", "请输入邮箱用户名")
             return False
-        
-        # 检查认证方式
+
+        # 获取提供商信息
         provider_text = self.provider_var.get().strip()
-        provider = provider_text.split(' (')[0] if ' (' in provider_text else provider_text
-        use_oauth = self.use_oauth_var.get() and 'gmail' in provider.lower()
-        
+        provider = provider_text.split(' (')[0].strip().lower() if ' (' in provider_text else provider_text.lower()
+
+        # 验证自定义邮箱配置
+        if provider == 'custom':
+            imap_server = self.custom_imap_server_var.get().strip()
+            imap_port_str = self.custom_imap_port_var.get().strip()
+
+            if not imap_server:
+                messagebox.showerror("错误", "请输入IMAP服务器地址")
+                return False
+
+            if not imap_port_str:
+                messagebox.showerror("错误", "请输入IMAP端口")
+                return False
+
+            try:
+                imap_port = int(imap_port_str)
+                if imap_port <= 0 or imap_port > 65535:
+                    messagebox.showerror("错误", "IMAP端口必须在1-65535之间")
+                    return False
+            except ValueError:
+                messagebox.showerror("错误", "IMAP端口必须是数字")
+                return False
+
+        # 检查认证方式
+        use_oauth = self.use_oauth_var.get() and 'gmail' in provider
+
         if use_oauth:
             # OAuth认证验证 - 先检查是否已有有效令牌
             oauth_authorized = False
@@ -870,7 +939,7 @@ class MailExporterGUI:
                         oauth_authorized = True
             except:
                 pass
-            
+
             # 如果OAuth未授权，则需要检查Client ID和Secret
             if not oauth_authorized:
                 if not self.client_id_var.get().strip():
@@ -1017,8 +1086,8 @@ class MailExporterGUI:
             
             # 获取OAuth配置
             oauth_config = None
-            use_oauth = self.use_oauth_var.get() and 'gmail' in provider.lower()
-            
+            use_oauth = self.use_oauth_var.get() and 'gmail' in provider
+
             if use_oauth:
                 oauth_config = {
                     'client_id': self.client_id_var.get().strip(),
@@ -1029,11 +1098,28 @@ class MailExporterGUI:
                 self.message_queue.put(("log", "使用OAuth2认证"))
                 # OAuth模式下密码参数可以为空
                 password = None
-            
+
+            # 获取自定义邮箱参数
+            custom_imap_server = None
+            custom_imap_port = None
+            custom_use_ssl = True
+
+            if provider == 'custom':
+                custom_imap_server = self.custom_imap_server_var.get().strip()
+                try:
+                    custom_imap_port = int(self.custom_imap_port_var.get().strip())
+                except ValueError:
+                    custom_imap_port = 993
+                custom_use_ssl = self.custom_use_ssl_var.get()
+                self.message_queue.put(("log", f"自定义IMAP服务器: {custom_imap_server}:{custom_imap_port}"))
+                if custom_use_ssl:
+                    self.message_queue.put(("log", "使用SSL/TLS加密连接"))
+
             # 调用增量导出函数，传入进度回调、附件参数、停止标志、代理设置、OAuth配置和邮件数量限制
-            email_count = fetch_emails_incremental(username, password, start_date, end_date, output_file, folder, 
-                                                  self.progress_callback, download_attachments, attachment_folder, 
-                                                  provider, lambda: self.stop_requested, proxy_config, oauth_config, email_count_limit)
+            email_count = fetch_emails_incremental(username, password, start_date, end_date, output_file, folder,
+                                                  self.progress_callback, download_attachments, attachment_folder,
+                                                  provider, lambda: self.stop_requested, proxy_config, oauth_config, email_count_limit,
+                                                  custom_imap_server, custom_imap_port, custom_use_ssl)
             
             if self.is_exporting:
                 if self.stop_requested:
