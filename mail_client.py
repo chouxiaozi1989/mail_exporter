@@ -22,15 +22,19 @@ from oauth_gmail import GmailOAuth
 class MailClient:
     """邮件客户端类"""
     
-    def __init__(self, provider_name: str = None, email_address: str = None, proxy_config: dict = None, oauth_config: dict = None):
+    def __init__(self, provider_name: str = None, email_address: str = None, proxy_config: dict = None, oauth_config: dict = None,
+                 custom_imap_server: str = None, custom_imap_port: int = None, custom_use_ssl: bool = True):
         """
         初始化邮件客户端
-        
+
         Args:
             provider_name: 邮箱服务提供商名称
             email_address: 邮箱地址（用于自动检测提供商）
             proxy_config: 代理配置字典，包含type, host, port, username, password等
             oauth_config: OAuth配置字典，包含client_id, client_secret, credentials_file等
+            custom_imap_server: 自定义IMAP服务器地址（当provider_name为'custom'时使用）
+            custom_imap_port: 自定义IMAP端口（当provider_name为'custom'时使用）
+            custom_use_ssl: 自定义是否使用SSL（当provider_name为'custom'时使用）
         """
         self.providers = EmailProviders()
         self.parser = EmailParser()
@@ -40,16 +44,27 @@ class MailClient:
         self.proxy_config = proxy_config
         self.oauth_config = oauth_config or {}
         self.gmail_oauth = None
-        
+        self.is_custom_provider = False
+
         # 确定邮箱配置
-        if provider_name:
+        if provider_name == 'custom':
+            # 使用自定义配置
+            if not custom_imap_server or not custom_imap_port:
+                raise ValueError("使用自定义提供商时必须提供IMAP服务器和端口")
+            self.config = self.providers.create_custom_provider(
+                imap_server=custom_imap_server,
+                imap_port=custom_imap_port,
+                use_ssl=custom_use_ssl
+            )
+            self.is_custom_provider = True
+        elif provider_name:
             self.config = self.providers.get_provider_by_name(provider_name)
         elif email_address:
             self.config = self.providers.get_provider_by_email(email_address)
-        
+
         if not self.config:
             raise ValueError("无法确定邮箱服务提供商配置")
-        
+
         # 如果提供了OAuth配置且是Gmail，设置为OAuth2认证
         if self.oauth_config and self.config.name == 'gmail':
             # 创建一个新的配置副本，修改认证类型

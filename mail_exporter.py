@@ -16,12 +16,13 @@ from oauth_gmail import GmailOAuth
 
 def get_supported_providers():
     """获取支持的邮箱服务提供商列表
-    
+
     Returns:
-        支持的提供商列表
+        支持的提供商字典 {name: display_name}
     """
     providers = EmailProviders()
-    return providers.get_all_providers()
+    all_providers = providers.get_all_providers()
+    return {name: config.display_name for name, config in all_providers.items()}
 
 def get_mail_folders(username, password, provider=None, proxy_config=None, oauth_config=None):
     """获取邮箱文件夹列表"""
@@ -65,18 +66,24 @@ def fetch_emails(username, password, start_date, end_date, output_file, folder="
     except Exception as e:
         raise Exception(f"邮件导出失败: {str(e)}")
 
-def fetch_emails_incremental(username, password, start_date, end_date, output_file, folder="INBOX", 
-                            progress_callback=None, download_attachments=False, attachment_folder=None, 
-                            provider=None, stop_flag=None, proxy_config=None, oauth_config=None, email_count_limit=0):
+def fetch_emails_incremental(username, password, start_date, end_date, output_file, folder="INBOX",
+                            progress_callback=None, download_attachments=False, attachment_folder=None,
+                            provider=None, stop_flag=None, proxy_config=None, oauth_config=None, email_count_limit=0,
+                            custom_imap_server=None, custom_imap_port=None, custom_use_ssl=True):
     """从邮箱增量获取邮件并导出（支持按条写入和停止保存）"""
     try:
         # 使用MailClient进行邮件获取和导出
-        if provider:
+        if provider == 'custom':
+            # 使用自定义配置
+            client = MailClient(provider_name='custom', proxy_config=proxy_config, oauth_config=oauth_config,
+                              custom_imap_server=custom_imap_server, custom_imap_port=custom_imap_port,
+                              custom_use_ssl=custom_use_ssl)
+        elif provider:
             client = MailClient(provider_name=provider, proxy_config=proxy_config, oauth_config=oauth_config)
         else:
             client = MailClient(email_address=username, proxy_config=proxy_config, oauth_config=oauth_config)
         client.connect(username, password)
-        
+
         email_count = client.fetch_emails_incremental(
             start_date=start_date,
             end_date=end_date,
@@ -88,10 +95,10 @@ def fetch_emails_incremental(username, password, start_date, end_date, output_fi
             stop_flag=stop_flag,
             email_count_limit=email_count_limit
         )
-        
+
         client.disconnect()
         return email_count
-        
+
     except Exception as e:
         raise Exception(f"增量邮件导出失败: {str(e)}")
 

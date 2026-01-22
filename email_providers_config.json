@@ -54,6 +54,18 @@
       "domain_patterns": ["yahoo.com", "yahoo.cn", "ymail.com"],
       "description": "雅虎邮箱服务",
       "setup_instructions": "需要开启两步验证并生成应用密码"
+    },
+    "custom": {
+      "name": "custom",
+      "display_name": "其他邮箱(自定义)",
+      "imap_server": "",
+      "imap_port": 993,
+      "use_ssl": true,
+      "auth_type": "password",
+      "domain_patterns": [],
+      "description": "通用邮箱服务 - 需要手动配置IMAP服务器信息",
+      "setup_instructions": "请输入邮箱提供商的IMAP服务器地址、端口等信息",
+      "is_custom": true
     }
   },
   "default_settings": {
